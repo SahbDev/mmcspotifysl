@@ -29,6 +29,73 @@ let spotifyTokens = {
 app.use(express.static('public'));
 app.use(express.json());
 
+// ================= FUNÇÕES =================
+
+// Função para atualizar token do Spotify
+async function refreshAccessToken() {
+  try {
+    const data = await spotifyApi.refreshAccessToken();
+    const { access_token, expires_in } = data.body;
+    
+    spotifyTokens.accessToken = access_token;
+    spotifyTokens.expiresAt = Date.now() + (expires_in * 1000);
+    spotifyApi.setAccessToken(access_token);
+    
+    console.log('✅ Token do Spotify atualizado');
+  } catch (error) {
+    console.error('❌ Erro ao atualizar token:', error);
+  }
+}
+
+// Função para buscar música atual
+async function updateCurrentTrack() {
+  if (!spotifyTokens.accessToken) return;
+
+  // Verificar se precisa atualizar o token
+  if (Date.now() >= spotifyTokens.expiresAt - 60000) {
+    await refreshAccessToken();
+  }
+
+  try {
+    const playback = await spotifyApi.getMyCurrentPlaybackState();
+    
+    if (playback.body && playback.body.item) {
+      const track = playback.body.item;
+      const isPlaying = playback.body.is_playing;
+      
+      currentTrack = {
+        is_playing: isPlaying,
+        track: track.name,
+        artist: track.artists.map(artist => artist.name).join(', '),
+        album: track.album.name,
+        error: false
+      };
+      
+      console.log(`🎵 Tocando: ${currentTrack.track} - ${currentTrack.artist}`);
+    } else {
+      currentTrack = {
+        is_playing: false,
+        track: 'Nada tocando',
+        artist: '',
+        album: '',
+        error: false
+      };
+    }
+  } catch (error) {
+    console.error('❌ Erro ao buscar música:', error);
+    currentTrack.error = true;
+  }
+}
+
+// Iniciar atualização automática a cada 5 segundos
+function startTrackUpdater() {
+  // Atualizar imediatamente
+  updateCurrentTrack();
+  
+  // Atualizar a cada 5 segundos
+  setInterval(updateCurrentTrack, 5000);
+}
+
 // ================= ROTAS =================
 
 // Página inicial
@@ -112,6 +179,9 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setRefreshToken(refresh_token);
     
     console.log('✅ Autenticação realizada com sucesso!');
+    
+    // INICIAR ATUALIZAÇÃO AUTOMÁTICA DAS MÚSICAS
+    startTrackUpdater();
     
     res.send(`
       <!DOCTYPE html>

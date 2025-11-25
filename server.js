@@ -12,10 +12,18 @@ const spotifyApi = new SpotifyWebApi({
 
 const app = express();
 
-// Rota de Login
+// ==========================================================
+// ROTA DE LOGIN CORRIGIDA PARA FORÇAR A TELA DE PERMISSÃO
+// ==========================================================
 app.get('/login', (req, res) => {
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
-  res.redirect(spotifyApi.createAuthorizeURL(scopes, 'state'));
+  
+  const options = {
+    state: 'state',
+    showDialog: true // <--- ISSO FORÇA A TELA DE CONSENTIMENTO
+  };
+  
+  res.redirect(spotifyApi.createAuthorizeURL(scopes, options));
 });
 
 // Rota de Callback
@@ -53,7 +61,6 @@ app.get('/tocando', async (req, res) => {
       res.json({ tocando: false });
     }
   } catch (err) {
-    // Tenta renovar o token se expirar
     if (err.statusCode === 401) {
       try {
         const data = await spotifyApi.refreshAccessToken();
@@ -69,7 +76,7 @@ app.get('/tocando', async (req, res) => {
 });
 
 // ==========================================================
-// ROTAS DE CONTROLE (PLAY, PAUSE, NEXT, PREVIOUS)
+// ROTAS DE CONTROLE (PLAY, PAUSE, NEXT, PREVIOUS, REVOKE)
 // ==========================================================
 
 app.post('/play', async (req, res) => {
@@ -107,10 +114,6 @@ app.post('/previous', async (req, res) => {
     res.status(500).send(`Erro ao voltar: ${err.message}`);
   }
 });
-
-// ==========================================================
-// NOVA ROTA: REVOGAÇÃO DO TOKEN (Limpa a memória)
-// ==========================================================
 
 app.post('/revoke', (req, res) => {
   spotifyApi.setAccessToken(null);

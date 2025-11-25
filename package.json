@@ -1,0 +1,13 @@
+{
+  "name": "meu-spotify-sl",
+  "version": "1.0.0",
+  "description": "Script SL",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "spotify-web-api-node": "^5.0.2"
+  }
+}

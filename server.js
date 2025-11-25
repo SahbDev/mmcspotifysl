@@ -1,4 +1,4 @@
-// server.js - VERSÃO ZERO (NOVA ABORDAGEM)
+// server.js - VERSÃO COM SUPORTE AO PLAYER VISUAL
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
@@ -121,7 +121,7 @@ async function getSpotifyClient(userId) {
     return spotifyApi;
 }
 
-// Rota de status (SIMPLIFICADA)
+// Rota de status (MANTIDO IGUAL - já funciona perfeitamente)
 app.get('/status', async (req, res) => {
     const userId = req.query.user;
     
@@ -160,7 +160,7 @@ app.get('/status', async (req, res) => {
     }
 });
 
-// Rotas de controle (SIMPLIFICADAS)
+// Rotas de controle (MANTIDAS IGUAIS)
 app.post('/play', async (req, res) => {
     await handleControl(req, res, 'play');
 });
@@ -223,7 +223,7 @@ app.get('/', (req, res) => {
     res.json({ 
         status: 'running', 
         users: userSessions.size,
-        version: '2.0-simple' 
+        version: '2.1-player' 
     });
 });
 

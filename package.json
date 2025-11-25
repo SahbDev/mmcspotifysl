@@ -1,7 +1,7 @@
 {
   "name": "meu-spotify-sl",
   "version": "1.0.0",
-  "description": "Script SL",
+  "description": "Display Spotify no Second Life",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"

@@ -33,7 +33,6 @@ app.use(express.json());
 
 // ================= FUNÇÕES =================
 
-// Função para atualizar token do Spotify
 async function refreshAccessToken() {
   try {
     const data = await spotifyApi.refreshAccessToken();
@@ -43,17 +42,16 @@ async function refreshAccessToken() {
     spotifyTokens.expiresAt = Date.now() + (expires_in * 1000);
     spotifyApi.setAccessToken(access_token);
     
-    console.log('✅ Token do Spotify atualizado');
+    console.log('✅ Token atualizado');
   } catch (error) {
     console.error('❌ Erro ao atualizar token:', error);
   }
 }
 
-// Função para buscar música atual
+// **FUNÇÃO ATUALIZADA - AGORA COM progress e duration**
 async function updateCurrentTrack() {
   if (!spotifyTokens.accessToken) return;
 
-  // Verificar se precisa atualizar o token
   if (Date.now() >= spotifyTokens.expiresAt - 60000) {
     await refreshAccessToken();
   }
@@ -64,6 +62,8 @@ async function updateCurrentTrack() {
     if (playback.body && playback.body.item) {
       const track = playback.body.item;
       const isPlaying = playback.body.is_playing;
+      
+      // **DADOS DE PROGRESSO ADICIONADOS AQUI**
       const progress = playback.body.progress_ms || 0;
       const duration = track.duration_ms || 0;
       
@@ -72,12 +72,12 @@ async function updateCurrentTrack() {
         track: track.name,
         artist: track.artists.map(artist => artist.name).join(', '),
         album: track.album.name,
-        progress: progress,
-        duration: duration,
+        progress: progress,        // ✅ AGORA ENVIA PROGRESSO
+        duration: duration,        // ✅ AGORA ENVIA DURAÇÃO
         error: false
       };
       
-      console.log(`🎵 ${currentTrack.track} - ${currentTrack.artist} (${Math.round(progress/1000)}s/${Math.round(duration/1000)}s)`);
+      console.log(`🎵 ${currentTrack.track} - Progresso: ${progress}ms/${duration}ms`);
     } else {
       currentTrack = {
         is_playing: false,
@@ -95,7 +95,6 @@ async function updateCurrentTrack() {
   }
 }
 
-// Iniciar atualização automática a cada 3 segundos
 function startTrackUpdater() {
   updateCurrentTrack();
   setInterval(updateCurrentTrack, 3000);
@@ -103,7 +102,6 @@ function startTrackUpdater() {
 
 // ================= ROTAS =================
 
-// Página inicial
 app.get('/', (req, res) => {
   res.send(`
     <html>
@@ -137,12 +135,10 @@ app.get('/', (req, res) => {
       <body>
         <div class="container">
           <h1>🎵 Spotify para Second Life</h1>
-          <p>Conecte sua conta do Spotify para mostrar a música atual no Second Life</p>
-          
+          <p>Conecte sua conta do Spotify</p>
           <a href="/login" class="button">🔗 Conectar com Spotify</a>
-          
           <div style="margin-top: 30px;">
-            <p><strong>URL para o Second Life:</strong></p>
+            <p><strong>URL para Second Life:</strong></p>
             <code>https://mmcspotifysl.onrender.com/current-track</code>
           </div>
         </div>
@@ -151,14 +147,12 @@ app.get('/', (req, res) => {
   `);
 });
 
-// Login com Spotify
 app.get('/login', (req, res) => {
   const scopes = ['user-read-currently-playing', 'user-read-playback-state'];
   const authUrl = spotifyApi.createAuthorizeURL(scopes);
   res.redirect(authUrl);
 });
 
-// Callback do Spotify
 app.get('/callback', async (req, res) => {
   const { code, error } = req.query;
 
@@ -211,7 +205,6 @@ app.get('/callback', async (req, res) => {
           <h1>🎵 Autenticação Concluída!</h1>
           <p>Seu Spotify foi conectado com sucesso ao Second Life.</p>
           <p>Você pode fechar esta janela e voltar para o Second Life.</p>
-          <p><small>O sistema começará a atualizar automaticamente.</small></p>
         </div>
         <script>
           setTimeout(() => window.close(), 3000);
@@ -230,7 +223,6 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// Rota para o Second Life buscar dados
 app.get('/current-track', (req, res) => {
   res.json({
     success: true,
@@ -239,7 +231,6 @@ app.get('/current-track', (req, res) => {
   });
 });
 
-// Status do serviço
 app.get('/status', (req, res) => {
   res.json({
     authenticated: !!spotifyTokens.accessToken,
@@ -248,8 +239,7 @@ app.get('/status', (req, res) => {
   });
 });
 
-// ================= INICIAR SERVIDOR =================
 app.listen(PORT, () => {
-  console.log(`🎵 Servidor Spotify rodando na porta ${PORT}`);
+  console.log(`🎵 Servidor rodando na porta ${PORT}`);
   console.log(`📡 URL para SL: https://mmcspotifysl.onrender.com/current-track`);
 });

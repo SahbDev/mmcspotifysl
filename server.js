@@ -1,4 +1,4 @@
-// server.js (VERSÃO FINAL CORRIGIDA - PROTOCOLO UNIFICADO)
+// server.js (VERSÃO FINAL CORRIGIDA - SEM LOOPING)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
@@ -114,13 +114,22 @@ app.get('/tocando', async (req, res) => {
         progresso_ms: data.body.progress_ms,
         duracao_ms: data.body.item.duration_ms
       });
+    } else if (data.body && data.body.item) {
+      // Tem dados mas está pausado
+      res.json({ 
+        status: "paused",
+        musica: data.body.item.name,
+        artista: data.body.item.artists.map(a => a.name).join(', '),
+        progresso_ms: data.body.progress_ms,
+        duracao_ms: data.body.item.duration_ms
+      });
     } else {
-      // CORREÇÃO: Retorna status 'paused' em vez de 'tocando: false'
+      // Não está tocando nada
       res.json({ status: "paused" });
     }
   } catch (err) {
-    // Se der erro na API, assume pausado
-    res.json({ status: "paused" });
+    // Se der erro na API, assume desconectado
+    res.json({ status: "disconnected" });
   }
 });
 

@@ -25,7 +25,7 @@ app.get('/login', (req, res) => {
 });
 
 // ==========================================================
-// ROTA DE CALLBACK COM NOVO VISUAL E ESTILO (FUNDO ESCURO, FONTE BRANCA)
+// ROTA DE CALLBACK COM VISUAL FINAL (TODOS OS TEXTOS BRANCOS)
 // ==========================================================
 app.get('/callback', async (req, res) => {
   const { code } = req.query;
@@ -36,9 +36,13 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setAccessToken(access_token);
     spotifyApi.setRefreshToken(refresh_token);
 
-    // HTML personalizado com cores ajustadas para branco
+    // HTML personalizado com as mensagens e o rodapé
     const successHtml = `
       <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+        
+        <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
+          MMC - Spotify Player
+        </h2>
         
         <h1 style="color: white; font-size: 48px; margin-bottom: 20px;">
           You are now ready to press play <span style="font-size: 0.8em;">&lt;3</span>
@@ -51,7 +55,7 @@ app.get('/callback', async (req, res) => {
           You can now close this tab. Thank you!
         </p>
         
-        <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: #555;">
+        <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
           MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
         </footer>
       </body>

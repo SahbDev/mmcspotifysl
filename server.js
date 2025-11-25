@@ -1,151 +1,233 @@
+// server.js - VERSÃO ZERO (NOVA ABORDAGEM)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-// BANCO DE DADOS EM MEMÓRIA (Multi-Usuário)
-const users = {};
+// Configuração simples
+const spotifyConfig = {
+    clientId: process.env.SPOTIFY_CLIENT_ID,
+    clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+    redirectUri: process.env.REDIRECT_URI || 'http://localhost:3000/callback'
+};
 
-function getClient() {
-    return new SpotifyWebApi({
-        clientId: process.env.SPOTIFY_CLIENT_ID,
-        clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-        redirectUri: process.env.REDIRECT_URI
-    });
-}
+// Armazenamento em memória (simples)
+const userSessions = new Map();
 
-// 1. LOGIN (Recebe ID do Avatar)
-app.get('/login', (req, res) => {
-    const userId = req.query.user;
-    if (!userId) return res.send("Erro: ID do avatar faltando.");
-
-    const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
-    const client = getClient();
-    // O 'state' carrega o ID do avatar para a volta
-    res.redirect(client.createAuthorizeURL(scopes, userId));
+// Middleware básico
+app.use(express.json());
+app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', 'GET, POST');
+    res.header('Access-Control-Allow-Headers', 'Content-Type');
+    console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - User: ${req.query.user}`);
+    next();
 });
 
-// 2. CALLBACK (Salva o Token e Mostra seu Site Bonito)
+// Rota de login
+app.get('/login', (req, res) => {
+    const userId = req.query.user;
+    if (!userId) {
+        return res.status(400).send('User ID required');
+    }
+
+    const spotifyApi = new SpotifyWebApi(spotifyConfig);
+    const scopes = ['user-read-playback-state', 'user-modify-playback-state'];
+    const authUrl = spotifyApi.createAuthorizeURL(scopes, userId);
+    
+    res.redirect(authUrl);
+});
+
+// Callback de autenticação
 app.get('/callback', async (req, res) => {
-    const { code, state } = req.query; // state = userId
-    const userId = state;
-
-    if (!userId) return res.send("Erro Fatal: ID perdido.");
-
+    const { code, state: userId } = req.query;
+    
     try {
-        const client = getClient();
-        const data = await client.authorizationCodeGrant(code);
+        const spotifyApi = new SpotifyWebApi(spotifyConfig);
+        const authData = await spotifyApi.authorizationCodeGrant(code);
+        
+        userSessions.set(userId, {
+            accessToken: authData.body.access_token,
+            refreshToken: authData.body.refresh_token,
+            expiresAt: Date.now() + (authData.body.expires_in * 1000)
+        });
 
-        // Salva na memória
-        users[userId] = {
-            access: data.body.access_token,
-            refresh: data.body.refresh_token,
-            expires: Date.now() + (data.body.expires_in * 1000)
-        };
+        console.log(`✅ User ${userId} authenticated successfully`);
 
-        // SEU HTML VISUAL (Aprovado)
         res.send(`
             <!DOCTYPE html>
             <html>
             <head>
-            <meta charset="UTF-8">
-            <style>
-                @import url('https://fonts.googleapis.com/css2?family=Montserrat:wght@400;700&display=swap');
-                @keyframes pulse { 0% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.02); opacity: 1; } 100% { transform: scale(1); opacity: 0.9; } }
-                body { margin: 0; background: radial-gradient(circle at center, #2b2b2b 0%, #000000 100%); color: white; font-family: 'Montserrat', sans-serif; text-align: center; display: flex; flex-direction: column; align-items: center; padding-top: 5vh; min-height: 100vh; }
-                h1 { font-size: 42px; margin-bottom: 10px; animation: pulse 3s infinite ease-in-out; }
-                h2 { font-size: 24px; color: #cccccc; margin-bottom: 30px; font-weight: 700; letter-spacing: 1px; text-transform: uppercase; border-bottom: 1px solid #555; padding-bottom: 15px; width: 60%; }
-                p { font-size: 18px; color: #cccccc; margin: 5px 0; }
-                .menu-preview { margin-top: 25px; margin-bottom: 15px; max-width: 85%; width: 420px; border-radius: 12px; border: 1px solid #333; box-shadow: 0 10px 30px rgba(0,0,0,0.7); }
-                .instruction { font-size: 14px; color: #cccccc; margin-top: 10px; }
-                footer { margin-top: auto; width: 100%; font-size: 11px; color: rgba(255, 255, 255, 0.5); padding-bottom: 20px; }
-            </style>
+                <title>Spotify Connected</title>
+                <style>
+                    body { 
+                        font-family: Arial, sans-serif; 
+                        text-align: center; 
+                        padding: 50px; 
+                        background: #1DB954;
+                        color: white;
+                    }
+                    .success { 
+                        background: white; 
+                        color: #1DB954; 
+                        padding: 30px; 
+                        border-radius: 10px;
+                        margin: 20px auto;
+                        max-width: 400px;
+                    }
+                </style>
             </head>
             <body>
-            <h2>MMC - Spotify Player</h2>
-            <h1>You are now ready to press play <span style="color: #ff6b6b;">&lt;3</span></h1>
-            <p>Your Spotify Player is ready to use!</p>
-            <p style="font-size: 16px;">You can now close this tab. Thank you!</p>
-            <img src="https://i.gyazo.com/fad06bc27b3dd7752587726c4a83b4cf.png" class="menu-preview">
-            <p class="instruction">Click on your player to change tracks, pause, customize colors and more.</p>
-            <footer>MMC - Spotify Player Plug-in Created by Saori Suki</footer>
+                <div class="success">
+                    <h1>✅ Connected!</h1>
+                    <p>Your Spotify account is now linked.</p>
+                    <p>You can close this window and return to Second Life.</p>
+                </div>
             </body>
             </html>
         `);
-    } catch (err) {
-        res.send("Erro ao autenticar: " + err.message);
+
+    } catch (error) {
+        console.error('Auth error:', error);
+        res.status(500).send('Authentication failed');
     }
 });
 
-// 3. CHECAGEM DE STATUS (O Cérebro)
+// Obter cliente do Spotify para usuário
+async function getSpotifyClient(userId) {
+    const session = userSessions.get(userId);
+    if (!session) return null;
+
+    const spotifyApi = new SpotifyWebApi({
+        ...spotifyConfig,
+        accessToken: session.accessToken,
+        refreshToken: session.refreshToken
+    });
+
+    // Refresh token se necessário
+    if (Date.now() > session.expiresAt - 60000) {
+        try {
+            const refreshData = await spotifyApi.refreshAccessToken();
+            session.accessToken = refreshData.body.access_token;
+            session.expiresAt = Date.now() + (refreshData.body.expires_in * 1000);
+            spotifyApi.setAccessToken(refreshData.body.access_token);
+        } catch (error) {
+            userSessions.delete(userId);
+            return null;
+        }
+    }
+
+    return spotifyApi;
+}
+
+// Rota de status (SIMPLIFICADA)
 app.get('/status', async (req, res) => {
     const userId = req.query.user;
     
-    // SE NÃO TIVER USUÁRIO SALVO, MANDA CONFIGURAR
-    if (!userId || !users[userId]) {
-        return res.json({ status: "setup_required" });
+    if (!userId || !userSessions.has(userId)) {
+        return res.json({ status: "disconnected" });
     }
 
-    const client = getClient();
-    client.setAccessToken(users[userId].access);
-    client.setRefreshToken(users[userId].refresh);
-
-    // Renova Token se precisar
-    if (Date.now() > users[userId].expires - 60000) {
-        try {
-            const data = await client.refreshAccessToken();
-            users[userId].access = data.body.access_token;
-            users[userId].expires = Date.now() + (data.body.expires_in * 1000);
-            client.setAccessToken(data.body.access_token);
-        } catch (err) {
-            return res.json({ status: "setup_required" }); // Perdeu acesso -> Setup
-        }
-    }
-
-    // Pega a música
     try {
-        const data = await client.getMyCurrentPlaybackState();
-        if (data.body && data.body.is_playing) {
-            res.json({
-                status: "playing",
-                track: data.body.item.name,
-                artist: data.body.item.artists.map(a => a.name).join(', '),
-                cur: data.body.progress_ms,
-                tot: data.body.item.duration_ms
-            });
-        } else {
-            res.json({ status: "paused" });
+        const spotifyApi = await getSpotifyClient(userId);
+        if (!spotifyApi) {
+            userSessions.delete(userId);
+            return res.json({ status: "disconnected" });
         }
-    } catch (err) {
-        res.json({ status: "paused" }); // Erro de API = Pausado (não quebra)
+
+        const playbackState = await spotifyApi.getMyCurrentPlaybackState();
+        
+        if (!playbackState.body || !playbackState.body.item) {
+            return res.json({ status: "paused" });
+        }
+
+        const track = playbackState.body.item;
+        const response = {
+            status: playbackState.body.is_playing ? "playing" : "paused",
+            artist: track.artists.map(artist => artist.name).join(', '),
+            track: track.name,
+            progress: playbackState.body.progress_ms || 0,
+            duration: track.duration_ms
+        };
+
+        res.json(response);
+
+    } catch (error) {
+        console.error('Status error:', error.message);
+        userSessions.delete(userId);
+        res.json({ status: "disconnected" });
     }
 });
 
-// 4. CONTROLES (Play, Pause, Next, Prev)
-app.post('/control', async (req, res) => {
-    const { user, cmd } = req.query;
-    if (!user || !users[user]) return res.sendStatus(401);
-
-    const client = getClient();
-    client.setAccessToken(users[user].access);
-
-    try {
-        if (cmd === 'play') await client.play();
-        if (cmd === 'pause') await client.pause();
-        if (cmd === 'next') await client.skipToNext();
-        if (cmd === 'prev') await client.skipToPrevious();
-        res.send('OK');
-    } catch (err) {
-        res.sendStatus(200); // Ignora erro para não travar LSL
-    }
+// Rotas de controle (SIMPLIFICADAS)
+app.post('/play', async (req, res) => {
+    await handleControl(req, res, 'play');
 });
 
-// 5. REVOKE (Limpa usuário)
+app.post('/pause', async (req, res) => {
+    await handleControl(req, res, 'pause');
+});
+
+app.post('/next', async (req, res) => {
+    await handleControl(req, res, 'next');
+});
+
+app.post('/previous', async (req, res) => {
+    await handleControl(req, res, 'previous');
+});
+
+// Função de controle unificada
+async function handleControl(req, res, action) {
+    const userId = req.query.user;
+    const spotifyApi = await getSpotifyClient(userId);
+
+    if (!spotifyApi) {
+        return res.status(401).json({ error: "Not authenticated" });
+    }
+
+    try {
+        switch (action) {
+            case 'play':
+                await spotifyApi.play();
+                break;
+            case 'pause':
+                await spotifyApi.pause();
+                break;
+            case 'next':
+                await spotifyApi.skipToNext();
+                break;
+            case 'previous':
+                await spotifyApi.skipToPrevious();
+                break;
+        }
+        res.json({ success: true });
+    } catch (error) {
+        console.error(`Control error (${action}):`, error.message);
+        res.status(500).json({ error: "Control failed" });
+    }
+}
+
+// Rota de revogação
 app.post('/revoke', (req, res) => {
     const userId = req.query.user;
-    if (users[userId]) delete users[userId];
-    res.send('Deleted');
+    if (userId && userSessions.has(userId)) {
+        userSessions.delete(userId);
+        console.log(`🗑️ Session revoked for user ${userId}`);
+    }
+    res.json({ success: true });
 });
 
-app.listen(port, () => console.log('Server UP'));
+// Health check
+app.get('/', (req, res) => {
+    res.json({ 
+        status: 'running', 
+        users: userSessions.size,
+        version: '2.0-simple' 
+    });
+});
+
+app.listen(PORT, () => {
+    console.log(`🎵 Spotify Server running on port ${PORT}`);
+    console.log(`🔑 Client ID: ${process.env.SPOTIFY_CLIENT_ID ? '✅' : '❌'}`);
+});

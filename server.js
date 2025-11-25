@@ -1,4 +1,3 @@
-// server.js
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
@@ -12,7 +11,7 @@ const spotifyApi = new SpotifyWebApi({
 
 const app = express();
 
-// Rota de Login (Forçando o showDialog para segurança)
+// Rota de Login (Força a tela de consentimento para segurança)
 app.get('/login', (req, res) => {
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   
@@ -25,7 +24,7 @@ app.get('/login', (req, res) => {
 });
 
 // ==========================================================
-// ROTA DE CALLBACK COM VISUAL FINAL (TODOS OS TEXTOS BRANCOS)
+// ROTA DE CALLBACK COM O VISUAL FINAL APROVADO
 // ==========================================================
 app.get('/callback', async (req, res) => {
   const { code } = req.query;
@@ -36,29 +35,138 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setAccessToken(access_token);
     spotifyApi.setRefreshToken(refresh_token);
 
-    // HTML personalizado com as mensagens e o rodapé
+    // HTML FINAL APROVADO
     const successHtml = `
-      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
-        
-        <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
-          MMC - Spotify Player
-        </h2>
-        
-        <h1 style="color: white; font-size: 48px; margin-bottom: 20px;">
-          You are now ready to press play <span style="font-size: 0.8em;">&lt;3</span>
-        </h1>
-        
-        <p style="font-size: 24px;">
-          Your Spotify Player is ready to use !
-        </p>
-        <p style="font-size: 18px; color: white;"> 
-          You can now close this tab. Thank you!
-        </p>
-        
-        <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
-          MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
-        </footer>
-      </body>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Spotify Connection Success</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Raleway:wght@300;400;600&display=swap');
+
+    @keyframes breathe {
+      0% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.02); opacity: 1; }
+      100% { transform: scale(1); opacity: 0.9; }
+    }
+
+    body {
+      margin: 0;
+      background: radial-gradient(circle at center, #2b2b2b 0%, #000000 100%);
+      color: white;
+      font-family: 'Raleway', sans-serif;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding-top: 5vh;
+      padding-bottom: 5vh;
+      min-height: 100vh;
+      box-sizing: border-box;
+    }
+
+    h1 {
+      font-family: 'Playfair Display', serif;
+      color: white;
+      font-size: 48px; 
+      margin-bottom: 10px;
+      margin-top: 0;
+      letter-spacing: 1px;
+      animation: breathe 4s infinite ease-in-out;
+    }
+
+    h2 {
+      font-family: 'Raleway', sans-serif;
+      font-size: 14px;
+      color: #cccccc;
+      margin-bottom: 40px;
+      font-weight: 600;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      border-bottom: 1px solid #555;
+      padding-bottom: 15px;
+      width: 60%;
+    }
+
+    p {
+      font-size: 18px;
+      color: #cccccc;
+      font-weight: 300;
+      line-height: 1.6;
+      margin: 5px 0;
+    }
+
+    .highlight {
+      color: #fff;
+      font-weight: 600;
+    }
+
+    .menu-preview {
+      margin-top: 35px;
+      margin-bottom: 20px;
+      max-width: 85%;
+      width: 420px; 
+      border-radius: 8px;
+      border: 1px solid #333;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.8);
+      transition: transform 0.5s ease;
+    }
+
+    .menu-preview:hover {
+      transform: translateY(-5px);
+    }
+
+    .instruction {
+      font-size: 14px;
+      color: #cccccc;
+      margin-top: 10px;
+      font-style: normal;
+      font-weight: 400;
+    }
+
+    footer {
+      margin-top: auto;
+      width: 100%;
+      text-align: center;
+      font-size: 11px;
+      color: #cccccc;
+      letter-spacing: 1px;
+      text-transform: uppercase;
+      padding-top: 40px;
+      opacity: 0.8;
+    }
+  </style>
+</head>
+<body>
+  
+  <h2>MMC - Spotify Player</h2>
+  
+  <h1>
+    You are ready to press play <span style="font-size: 0.8em; color: #fff;">&lt;3</span>
+  </h1>
+  
+  <p>
+    Your Spotify Player is now <span class="highlight">connected</span>.
+  </p>
+  <p style="font-size: 15px; color: #aaa;"> 
+    You may close this tab safely.
+  </p>
+
+  <img src="https://i.gyazo.com/fad06bc27b3dd7752587726c4a83b4cf.png" 
+       alt="Player Controls" 
+       class="menu-preview">
+  
+  <p class="instruction">
+    Click on your player to change tracks, pause, customize colors and more.
+  </p>
+
+  <footer>
+    MMC - Spotify Player Plug-in Created by Saori Suki
+  </footer>
+
+</body>
+</html>
     `;
 
     res.send(successHtml);
@@ -100,10 +208,7 @@ app.get('/tocando', async (req, res) => {
   }
 });
 
-// ==========================================================
-// ROTAS DE CONTROLE (PLAY, PAUSE, NEXT, PREVIOUS, REVOKE)
-// ==========================================================
-
+// ROTAS DE CONTROLE
 app.post('/play', async (req, res) => {
   try {
     await spotifyApi.play();
@@ -145,7 +250,6 @@ app.post('/revoke', (req, res) => {
   spotifyApi.setRefreshToken(null);
   res.status(200).send('Tokens Revoked');
 });
-
 
 // Inicializa o servidor
 app.listen(port, () => {

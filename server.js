@@ -9,7 +9,7 @@ const redisClient = Redis.createClient({
   url: process.env.REDIS_URL || 'redis://localhost:6379'
 });
 
-// Configuração Spotify BASE
+// Configuração Spotify
 const spotifyConfig = {
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
@@ -23,29 +23,32 @@ redisClient.on('error', (err) => console.log('Redis Client Error', err));
   console.log('✅ Redis conectado');
 })();
 
-// ================= SISTEMA MULTI-USUÁRIO ISOLADO =================
+// Map para intervals por usuário
+const userIntervals = new Map();
 
-// Buscar música atual do usuário (COMPLETAMENTE ISOLADA)
+// ================= FUNÇÕES MULTI-USUÁRIO =================
+
+// Buscar música do usuário
 async function updateUserTrack(userId) {
   try {
-    // Buscar sessão do usuário
+    console.log(`🔄 Buscando música para usuário: ${userId.slice(0,8)}`);
+    
     const sessionData = await redisClient.get(`user:${userId}`);
     if (!sessionData) {
-      console.log(`❌ Usuário ${userId} não encontrado`);
+      console.log(`❌ Sessão não encontrada para: ${userId.slice(0,8)}`);
       return null;
     }
 
     const session = JSON.parse(sessionData);
     
-    // Verificar se token expirou
+    // Verificar token
     if (Date.now() >= session.expiresAt - 60000) {
-      console.log(`🔄 Atualizando token para ${userId}`);
+      console.log(`🔄 Atualizando token para: ${userId.slice(0,8)}`);
       const newToken = await refreshUserToken(userId, session);
       if (!newToken) return null;
-      session.accessToken = newToken;
     }
 
-    // Criar instância Spotify COMPLETAMENTE NOVA para este usuário
+    // NOVA instância Spotify para CADA usuário
     const userSpotifyApi = new SpotifyWebApi({
       clientId: spotifyConfig.clientId,
       clientSecret: spotifyConfig.clientSecret,
@@ -61,36 +64,32 @@ async function updateUserTrack(userId) {
         is_playing: true,
         track: track.name || 'Música desconhecida',
         artist: track.artists ? track.artists.map(artist => artist.name).join(', ') : 'Artista desconhecido',
-        album: track.album?.name || '',
         progress: playback.body.progress_ms || 0,
         duration: track.duration_ms || 0,
         error: false
       };
       
-      console.log(`🎵 ${userId.slice(0,8)}: ${currentTrack.track} - ${currentTrack.artist}`);
+      console.log(`🎵 ${userId.slice(0,8)}: "${currentTrack.track}" - ${currentTrack.artist}`);
     } else {
       currentTrack = {
         is_playing: false,
         track: 'Nada tocando',
         artist: '',
-        album: '',
         progress: 0,
         duration: 0,
         error: false
       };
+      console.log(`⏸️ ${userId.slice(0,8)}: Nada tocando`);
     }
     
-    // Salvar track atual NO CACHE DO USUÁRIO
-    await redisClient.set(`track:${userId}`, JSON.stringify(currentTrack), {
-      EX: 60 // Expira em 60 segundos
-    });
+    // Salvar no cache do usuário
+    await redisClient.set(`track:${userId}`, JSON.stringify(currentTrack), { EX: 60 });
     
     return currentTrack;
     
   } catch (error) {
-    console.error(`❌ Erro ao buscar música para ${userId}:`, error.message);
+    console.error(`❌ Erro para ${userId.slice(0,8)}:`, error.message);
     
-    // Salvar estado de erro
     await redisClient.set(`track:${userId}`, JSON.stringify({
       error: true,
       track: 'Erro de conexão',
@@ -103,7 +102,7 @@ async function updateUserTrack(userId) {
   }
 }
 
-// Atualizar token do usuário
+// Atualizar token
 async function refreshUserToken(userId, session) {
   try {
     const userSpotifyApi = new SpotifyWebApi({
@@ -115,65 +114,52 @@ async function refreshUserToken(userId, session) {
     const data = await userSpotifyApi.refreshAccessToken();
     const { access_token, expires_in } = data.body;
     
-    // Atualizar sessão
     session.accessToken = access_token;
     session.expiresAt = Date.now() + (expires_in * 1000);
     
-    // Salvar sessão atualizada
     await redisClient.set(`user:${userId}`, JSON.stringify(session));
     
-    console.log(`✅ Token atualizado para ${userId.slice(0,8)}`);
+    console.log(`✅ Token atualizado para: ${userId.slice(0,8)}`);
     return access_token;
   } catch (error) {
-    console.error(`❌ Erro ao atualizar token para ${userId}:`, error);
+    console.error(`❌ Erro ao atualizar token para ${userId.slice(0,8)}:`, error);
     return null;
   }
 }
 
 // Iniciar updater para usuário
 function startUserUpdater(userId) {
+  console.log(`🚀 Iniciando updater para: ${userId.slice(0,8)}`);
+  
   // Atualizar imediatamente
   updateUserTrack(userId);
   
-  // Configurar intervalo com identificador único
-  const intervalId = setInterval(async () => {
-    await updateUserTrack(userId);
-  }, 3000);
-  
-  // Guardar reference do interval
+  // Configurar intervalo
+  const intervalId = setInterval(() => updateUserTrack(userId), 3000);
   userIntervals.set(userId, intervalId);
 }
 
-// Map para guardar intervals
-const userIntervals = new Map();
-
 // ================= ROTAS =================
 
-// Página inicial
 app.get('/', (req, res) => {
   res.send(`
     <!DOCTYPE html>
     <html>
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>MMC - Spotify Player</title>
-    </head>
-    <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
-        <h2>MMC - Spotify Player</h2>
-        <h1>Connect your Spotify Account</h1>
-        <a href="/login" style="background: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-size: 18px; display: inline-block; margin: 20px;">
-          Connect Spotify
-        </a>
-        <footer style="position: absolute; bottom: 10px; width: 100%; font-size: 10px;">
-          MMC - Spotify Player Plug-in Created by Saori Suki
-        </footer>
+    <head><meta charset="UTF-8"><title>MMC - Spotify Player</title></head>
+    <body style="margin: 0; background: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+      <h2>MMC - Spotify Player</h2>
+      <h1>Connect your Spotify Account</h1>
+      <a href="/login" style="background: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-size: 18px; display: inline-block; margin: 20px;">
+        Connect Spotify
+      </a>
+      <footer style="position: absolute; bottom: 10px; width: 100%; font-size: 10px;">
+        MMC - Spotify Player Plug-in Created by Saori Suki
+      </footer>
     </body>
     </html>
   `);
 });
 
-// Login
 app.get('/login', (req, res) => {
   const { user } = req.query;
   if (!user) return res.status(400).send('User ID required');
@@ -181,7 +167,6 @@ app.get('/login', (req, res) => {
   const scopes = ['user-read-currently-playing', 'user-read-playback-state'];
   const state = `user_${user}_${Date.now()}`;
 
-  // Salvar estado
   redisClient.set(`state:${state}`, user, { EX: 300 });
 
   const spotifyApi = new SpotifyWebApi(spotifyConfig);
@@ -189,22 +174,18 @@ app.get('/login', (req, res) => {
   res.redirect(authUrl);
 });
 
-// Callback
 app.get('/callback', async (req, res) => {
   const { code, state, error } = req.query;
-
   if (error) return res.status(400).send('Authentication error');
 
   try {
     const userId = await redisClient.get(`state:${state}`);
     if (!userId) return res.status(400).send('Invalid state');
 
-    // Criar instância NOVA para este usuário
     const userSpotifyApi = new SpotifyWebApi(spotifyConfig);
     const data = await userSpotifyApi.authorizationCodeGrant(code);
     const { access_token, refresh_token, expires_in } = data.body;
     
-    // Salvar sessão COMPLETAMENTE ISOLADA
     const userSession = {
       accessToken: access_token,
       refreshToken: refresh_token,
@@ -215,17 +196,15 @@ app.get('/callback', async (req, res) => {
     await redisClient.set(`user:${userId}`, JSON.stringify(userSession));
     await redisClient.del(`state:${state}`);
     
-    console.log(`🎉 NOVO USUÁRIO CONECTADO: ${userId}`);
-    console.log(`   Sessão salva em: user:${userId}`);
+    console.log(`🎉 NOVO USUÁRIO: ${userId}`);
     
-    // Iniciar updater
     startUserUpdater(userId);
     
     res.send(`
       <!DOCTYPE html>
       <html>
       <head><meta charset="UTF-8"><title>MMC - Spotify Player</title></head>
-      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+      <body style="margin: 0; background: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
         <h2>MMC - Spotify Player</h2>
         <h1>You are now ready to press play <3</h1>
         <p>Your Spotify Player is ready to use!</p>
@@ -243,143 +222,58 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// Rota para Second Life
 app.get('/current-track', async (req, res) => {
   const { user } = req.query;
-  
-  if (!user) {
-    return res.json({
-      success: false,
-      track: 'User not specified',
-      artist: '',
-      progress: 0,
-      duration: 0
-    });
-  }
+  if (!user) return res.json({ success: false, track: 'User not specified', artist: '', progress: 0, duration: 0 });
 
   try {
-    // Buscar track do cache do usuário
     const trackData = await redisClient.get(`track:${user}`);
     
     if (trackData) {
       const currentTrack = JSON.parse(trackData);
-      res.json({
-        success: true,
-        ...currentTrack,
-        timestamp: Date.now()
-      });
+      res.json({ success: true, ...currentTrack, timestamp: Date.now() });
     } else {
-      // Se não tem cache, buscar agora
       const freshTrack = await updateUserTrack(user);
       if (freshTrack) {
-        res.json({
-          success: true,
-          ...freshTrack,
-          timestamp: Date.now()
-        });
+        res.json({ success: true, ...freshTrack, timestamp: Date.now() });
       } else {
-        res.json({
-          success: false,
-          track: 'Not connected',
-          artist: '',
-          progress: 0,
-          duration: 0
-        });
+        res.json({ success: false, track: 'Not connected', artist: '', progress: 0, duration: 0 });
       }
     }
   } catch (error) {
     console.error(`❌ Erro em /current-track para ${user}:`, error);
-    res.json({
-      success: false,
-      track: 'Server error',
-      artist: '',
-      progress: 0,
-      duration: 0
-    });
+    res.json({ success: false, track: 'Server error', artist: '', progress: 0, duration: 0 });
   }
 });
 
-// Status com DEBUG
 app.get('/status', async (req, res) => {
   try {
     const userKeys = await redisClient.keys('user:*');
     const trackKeys = await redisClient.keys('track:*');
-    
-    // Debug: mostrar últimos usuários
-    const recentUsers = [];
-    for (let i = 0; i < Math.min(userKeys.length, 5); i++) {
-      const userData = await redisClient.get(userKeys[i]);
-      recentUsers.push({
-        key: userKeys[i],
-        data: userData ? JSON.parse(userData) : null
-      });
-    }
 
     res.json({
       online: true,
       userCount: userKeys.length,
       trackCount: trackKeys.length,
-      recentUsers: recentUsers,
       memory: process.memoryUsage(),
       uptime: process.uptime()
     });
   } catch (error) {
-    res.json({
-      online: true,
-      error: error.message
-    });
+    res.json({ online: true, error: error.message });
   }
 });
 
-// Debug: ver usuário específico
-app.get('/debug-user', async (req, res) => {
-  const { user } = req.query;
-  if (!user) return res.status(400).send('User required');
-
-  try {
-    const session = await redisClient.get(`user:${user}`);
-    const track = await redisClient.get(`track:${user}`);
-    
-    res.json({
-      user: user,
-      session: session ? JSON.parse(session) : null,
-      track: track ? JSON.parse(track) : null
-    });
-  } catch (error) {
-    res.json({ error: error.message });
-  }
-});
-
-// Logout
-app.get('/logout', async (req, res) => {
-  const { user } = req.query;
-  if (user) {
-    await redisClient.del(`user:${user}`);
-    await redisClient.del(`track:${user}`);
-    
-    // Parar interval
-    if (userIntervals.has(user)) {
-      clearInterval(userIntervals.get(user));
-      userIntervals.delete(user);
-    }
-    
-    console.log(`✅ Usuário ${user} desconectado`);
-  }
-  res.redirect('/');
-});
-
-// Health check
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
     timestamp: Date.now(),
-    userIntervals: userIntervals.size
+    userIntervals: userIntervals.size,
+    version: '2.0-multi-user'
   });
 });
 
-// ================= INICIAR =================
 app.listen(PORT, () => {
-  console.log(`🚀 Spotify Multi-User Server rodando na porta ${PORT}`);
-  console.log(`🔍 Debug: https://mmcspotifysl.onrender.com/status`);
-  console.log(`🎯 Health: https://mmcspotifysl.onrender.com/health`);
+  console.log(`🚀 SPOTIFY MULTI-USER SERVER rodando na porta ${PORT}`);
+  console.log(`🔍 Status: https://mmcspotifysl.onrender.com/status`);
+  console.log(`❤️  Health: https://mmcspotifysl.onrender.com/health`);
 });

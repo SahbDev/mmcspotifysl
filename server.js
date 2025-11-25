@@ -1,15 +1,14 @@
-// server.js (VERSÃO FINAL: MULTI-USUÁRIO / MULTI-CONTAS)
+// server.js (VERSÃO FINAL: VISUAL LUXO + MULTI-USUÁRIO CORRIGIDO)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const port = process.env.PORT || 3000;
 const app = express();
 
-// BANCO DE DADOS TEMPORÁRIO (Memória)
-// Guarda os tokens de cada avatar: { 'uuid_do_avatar': { access: '...', refresh: '...' } }
+// --- BANCO DE DADOS DE USUÁRIOS (MEMÓRIA) ---
 const userTokens = {}; 
 
-// Função auxiliar para criar a API configurada
+// Função para criar clientes novos
 function getSpotifyClient() {
   return new SpotifyWebApi({
     clientId: process.env.SPOTIFY_CLIENT_ID,
@@ -19,28 +18,29 @@ function getSpotifyClient() {
 }
 
 // ==================================================================
-// ROTA DE LOGIN (Agora recebe o ID do usuário do SL)
+// ROTA DE LOGIN (Recebe o ID do usuário do SL)
 // ==================================================================
 app.get('/login', (req, res) => {
-  const userID = req.query.user; // O script LSL vai mandar ?user=UUID
+  const userID = req.query.user; // Pega o ID do avatar
   
-  if (!userID) return res.send('Erro: ID de usuário não fornecido.');
+  // Se não tiver ID, avisa
+  if (!userID) return res.send('<h1 style="color:white; background:#222; padding:20px;">Erro: Use o HUD no Second Life para conectar.</h1>');
 
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   const spotifyApi = getSpotifyClient();
   
-  // Passamos o ID do usuário no 'state' para recuperar depois no callback
+  // Passa o ID do usuário no 'state' para recuperar depois
   const options = { state: userID, showDialog: true };
   
   res.redirect(spotifyApi.createAuthorizeURL(scopes, options));
 });
 
 // ==================================================================
-// ROTA DE CALLBACK (Salva o token no ID certo)
+// ROTA DE CALLBACK (Salva o token e Mostra o Visual Bonito)
 // ==================================================================
 app.get('/callback', async (req, res) => {
-  const { code, state } = req.query; // 'state' aqui é o UUID do avatar
-  const userID = state;
+  const { code, state } = req.query; 
+  const userID = state; // Recupera o ID do avatar
 
   if (!userID) return res.send('Erro: Identificação de usuário perdida.');
 
@@ -48,13 +48,14 @@ app.get('/callback', async (req, res) => {
     const spotifyApi = getSpotifyClient();
     const data = await spotifyApi.authorizationCodeGrant(code);
     
-    // SALVA OS TOKENS ESPECÍFICOS PARA ESSE USUÁRIO
+    // SALVA OS TOKENS DESTE USUÁRIO ESPECÍFICO
     userTokens[userID] = {
       accessToken: data.body.access_token,
       refreshToken: data.body.refresh_token,
       expiresAt: Date.now() + (data.body.expires_in * 1000)
     };
 
+    // --- SEU HTML BONITO AQUI ---
     const successHtml = `
 <!DOCTYPE html>
 <html>
@@ -64,14 +65,15 @@ app.get('/callback', async (req, res) => {
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Raleway:wght@300;400;600&display=swap');
     @keyframes breathe { 0% { opacity: 0.9; } 50% { opacity: 1; } 100% { opacity: 0.9; } }
-    body { margin: 0; background: radial-gradient(circle at center, #2b2b2b 0%, #000000 100%); color: white; font-family: 'Raleway', sans-serif; text-align: center; display: flex; flex-direction: column; align-items: center; padding-top: 5vh; min-height: 100vh; }
-    h1 { font-family: 'Playfair Display', serif; font-size: 48px; animation: breathe 4s infinite; }
-    h2 { font-family: 'Raleway', sans-serif; font-size: 14px; color: #cccccc; border-bottom: 1px solid #555; padding-bottom: 15px; width: 60%; text-transform: uppercase; letter-spacing: 3px; margin-bottom: 40px; }
-    p { font-size: 18px; color: #cccccc; margin: 5px 0; }
+    body { margin: 0; background: radial-gradient(circle at center, #2b2b2b 0%, #000000 100%); color: white; font-family: 'Raleway', sans-serif; text-align: center; display: flex; flex-direction: column; align-items: center; padding-top: 5vh; min-height: 100vh; box-sizing: border-box; }
+    h1 { font-family: 'Playfair Display', serif; font-size: 48px; margin-bottom: 10px; margin-top: 0; letter-spacing: 1px; animation: breathe 4s infinite; }
+    h2 { font-family: 'Raleway', sans-serif; font-size: 14px; color: #cccccc; margin-bottom: 40px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; border-bottom: 1px solid #555; padding-bottom: 15px; width: 60%; }
+    p { font-size: 18px; color: #cccccc; font-weight: 300; margin: 5px 0; }
     .highlight { color: #fff; font-weight: 600; }
-    .menu-preview { margin-top: 35px; margin-bottom: 20px; max-width: 85%; width: 420px; border-radius: 8px; border: 1px solid #333; box-shadow: 0 20px 50px rgba(0,0,0,0.8); }
-    .instruction { font-size: 14px; color: #cccccc; margin-top: 10px; }
-    footer { margin-top: auto; width: 100%; padding-top: 40px; padding-bottom: 20px; font-size: 11px; color: #cccccc; letter-spacing: 1px; text-transform: uppercase; opacity: 0.8; }
+    .menu-preview { margin-top: 35px; margin-bottom: 20px; max-width: 85%; width: 420px; border-radius: 8px; border: 1px solid #333; box-shadow: 0 20px 50px rgba(0,0,0,0.8); transition: transform 0.5s ease; }
+    .menu-preview:hover { transform: translateY(-5px); }
+    .instruction { font-size: 14px; color: #cccccc; margin-top: 10px; font-style: normal; font-weight: 400; }
+    footer { margin-top: auto; width: 100%; text-align: center; font-size: 11px; color: #cccccc; letter-spacing: 1px; text-transform: uppercase; padding-top: 40px; opacity: 0.8; }
   </style>
 </head>
 <body>
@@ -91,9 +93,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// ==================================================================
-// FUNÇÃO PARA PEGAR O CLIENTE AUTENTICADO DE UM USUÁRIO
-// ==================================================================
+// --- FUNÇÃO AUXILIAR: Recupera o cliente do usuário certo ---
 async function getUserClient(userID) {
   if (!userID || !userTokens[userID]) return null;
 
@@ -101,7 +101,7 @@ async function getUserClient(userID) {
   spotifyApi.setAccessToken(userTokens[userID].accessToken);
   spotifyApi.setRefreshToken(userTokens[userID].refreshToken);
 
-  // Verifica se precisa renovar o token
+  // Renova o token se precisar
   if (Date.now() > userTokens[userID].expiresAt - 60000) {
     try {
       const data = await spotifyApi.refreshAccessToken();
@@ -109,7 +109,6 @@ async function getUserClient(userID) {
       userTokens[userID].expiresAt = Date.now() + (data.body.expires_in * 1000);
       spotifyApi.setAccessToken(data.body.access_token);
     } catch (err) {
-      console.error("Erro ao renovar token", err);
       return null;
     }
   }
@@ -117,13 +116,15 @@ async function getUserClient(userID) {
 }
 
 // ==================================================================
-// ROTA DE STATUS (TOCANDO) - Multi-usuário
+// ROTA DE STATUS (TOCANDO) - COM PROTEÇÃO DE ERRO 401
 // ==================================================================
 app.get('/tocando', async (req, res) => {
   const userID = req.query.user;
   const spotifyApi = await getUserClient(userID);
 
-  if (!spotifyApi) return res.json({ tocando: false }); // Não logado
+  // SE NÃO ACHAR O USUÁRIO, MANDA ERRO 401 (Para o script resetar)
+  // Isso corrige o "Paused Eterno" se o servidor reiniciou
+  if (!spotifyApi) return res.sendStatus(401); 
 
   try {
     const data = await spotifyApi.getMyCurrentPlaybackState();
@@ -144,12 +145,12 @@ app.get('/tocando', async (req, res) => {
 });
 
 // ==================================================================
-// ROTAS DE CONTROLE - Multi-usuário
+// ROTAS DE CONTROLE - AGORA INDIVIDUAIS
 // ==================================================================
 const handleControl = async (req, res, action) => {
   const userID = req.query.user;
   const spotifyApi = await getUserClient(userID);
-  if (!spotifyApi) return res.status(401).send('No User');
+  if (!spotifyApi) return res.sendStatus(401); // Pede login se perder o token
 
   try {
     if (action === 'play') await spotifyApi.play();
@@ -169,9 +170,7 @@ app.post('/previous', (req, res) => handleControl(req, res, 'previous'));
 
 app.post('/revoke', (req, res) => {
   const userID = req.query.user;
-  if (userTokens[userID]) {
-    delete userTokens[userID]; // Remove apenas o token deste usuário
-  }
+  if (userTokens[userID]) delete userTokens[userID];
   res.status(200).send('Revoked');
 });
 

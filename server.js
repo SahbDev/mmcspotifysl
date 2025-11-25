@@ -1,3 +1,4 @@
+// server.js (VERSÃO FINAL: COM FOTO, ESTILO LUXO E CONTROLES)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
@@ -11,7 +12,7 @@ const spotifyApi = new SpotifyWebApi({
 
 const app = express();
 
-// Rota de Login (Força a tela de consentimento para segurança)
+// Rota de Login
 app.get('/login', (req, res) => {
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   
@@ -24,7 +25,7 @@ app.get('/login', (req, res) => {
 });
 
 // ==========================================================
-// ROTA DE CALLBACK COM O VISUAL FINAL APROVADO
+// ROTA DE CALLBACK COM O VISUAL FINAL APROVADO (COM FOTO)
 // ==========================================================
 app.get('/callback', async (req, res) => {
   const { code } = req.query;
@@ -35,7 +36,7 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setAccessToken(access_token);
     spotifyApi.setRefreshToken(refresh_token);
 
-    // HTML FINAL APROVADO
+    // AQUI ESTÁ O HTML QUE VOCÊ APROVOU NO TESTE
     const successHtml = `
 <!DOCTYPE html>
 <html>

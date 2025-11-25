@@ -1,10 +1,10 @@
+// server.js (VERSÃO FINAL CORRIGIDA - PROTOCOLO UNIFICADO)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const port = process.env.PORT || 3000;
 const app = express();
 
-// MEMÓRIA VOLÁTIL (Guarda os tokens por usuário)
 const userTokens = {}; 
 
 function getSpotifyClient() {
@@ -18,16 +18,16 @@ function getSpotifyClient() {
 // --- LOGIN ---
 app.get('/login', (req, res) => {
   const userID = req.query.user;
-  // Passa o ID do usuário como 'state' para recuperar depois
+  // Passa o ID do usuário para recuperar depois
   const options = { state: userID || 'unknown', showDialog: true };
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   res.redirect(getSpotifyClient().createAuthorizeURL(scopes, options));
 });
 
-// --- CALLBACK (VISUAL CORRETO COM FOTO) ---
+// --- CALLBACK (VISUAL CORRETO) ---
 app.get('/callback', async (req, res) => {
   const { code, state } = req.query;
-  const userID = state; // O ID do avatar volta aqui
+  const userID = state; 
 
   try {
     const spotifyApi = getSpotifyClient();
@@ -41,7 +41,7 @@ app.get('/callback', async (req, res) => {
         };
     }
 
-    // SEU HTML VISUAL APROVADO
+    // HTML VISUAL (Sua versão aprovada)
     res.send(`
 <!DOCTYPE html>
 <html>
@@ -76,7 +76,7 @@ app.get('/callback', async (req, res) => {
   }
 });
 
-// --- FUNÇÃO DE SUPORTE AO TOKEN ---
+// --- FUNÇÃO DE TOKEN ---
 async function getUserClient(userID) {
   if (!userID || !userTokens[userID]) return null;
   const spotifyApi = getSpotifyClient();
@@ -94,16 +94,18 @@ async function getUserClient(userID) {
   return spotifyApi;
 }
 
-// --- STATUS ---
+// --- STATUS (CORREÇÃO AQUI) ---
 app.get('/tocando', async (req, res) => {
   const userID = req.query.user;
   const spotifyApi = await getUserClient(userID);
 
-  // SE NÃO TIVER TOKEN, RETORNA "DISCONNECTED" (Não erro)
+  // Se não tem login, retorna status DISCONNECTED (importante para o LSL saber)
   if (!spotifyApi) return res.json({ status: "disconnected" });
 
   try {
     const data = await spotifyApi.getMyCurrentPlaybackState();
+    
+    // Se estiver tocando algo
     if (data.body && data.body.is_playing) {
       res.json({
         status: "playing",
@@ -113,9 +115,11 @@ app.get('/tocando', async (req, res) => {
         duracao_ms: data.body.item.duration_ms
       });
     } else {
+      // CORREÇÃO: Retorna status 'paused' em vez de 'tocando: false'
       res.json({ status: "paused" });
     }
   } catch (err) {
+    // Se der erro na API, assume pausado
     res.json({ status: "paused" });
   }
 });
@@ -132,7 +136,7 @@ const handleControl = async (req, res, action) => {
     if (action === 'next') await spotifyApi.skipToNext();
     if (action === 'previous') await spotifyApi.skipToPrevious();
     res.status(200).send('OK');
-  } catch (err) { res.status(200).send('OK'); }
+  } catch (err) { res.status(500).send('Error'); }
 };
 
 app.post('/play', (req, res) => handleControl(req, res, 'play'));

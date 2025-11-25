@@ -2,10 +2,8 @@
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
-// A porta onde o servidor vai rodar
 const port = process.env.PORT || 3000;
 
-// Configuração do Spotify API (use as variáveis de ambiente)
 const spotifyApi = new SpotifyWebApi({
   clientId: process.env.SPOTIFY_CLIENT_ID,
   clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
@@ -14,31 +12,29 @@ const spotifyApi = new SpotifyWebApi({
 
 const app = express();
 
-// Rota de Login (a mesma que você já usa)
+// Rota de Login
 app.get('/login', (req, res) => {
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   res.redirect(spotifyApi.createAuthorizeURL(scopes, 'state'));
 });
 
-// Rota de Callback (recebe o token de acesso)
+// Rota de Callback
 app.get('/callback', async (req, res) => {
   const { code } = req.query;
   try {
     const data = await spotifyApi.authorizationCodeGrant(code);
     const { access_token, refresh_token } = data.body;
 
-    // Salva os tokens na instância da API para uso futuro
     spotifyApi.setAccessToken(access_token);
     spotifyApi.setRefreshToken(refresh_token);
 
-    // Mensagem de sucesso para o navegador do SL
     res.send('<h1>Conectado! Pode fechar.</h1>');
   } catch (err) {
     res.send(`<h1>Erro ao conectar: ${err.message}</h1>`);
   }
 });
 
-// Rota para Obter a Música Atual (o que o SL usa a cada 3s)
+// Rota para Obter a Música Atual
 app.get('/tocando', async (req, res) => {
   try {
     const data = await spotifyApi.getMyCurrentPlaybackState();
@@ -57,12 +53,11 @@ app.get('/tocando', async (req, res) => {
       res.json({ tocando: false });
     }
   } catch (err) {
-    // Se o token expirar, tenta renovar
+    // Tenta renovar o token se expirar
     if (err.statusCode === 401) {
       try {
         const data = await spotifyApi.refreshAccessToken();
         spotifyApi.setAccessToken(data.body.access_token);
-        // Tenta buscar a música novamente após a renovação
         return res.redirect('/tocando');
       } catch (refreshErr) {
         res.status(401).json({ error: 'Token expirado. Reconecte-se.' });
@@ -74,10 +69,9 @@ app.get('/tocando', async (req, res) => {
 });
 
 // ==========================================================
-// NOVAS ROTAS DE CONTROLE PARA O MENU LSL
+// ROTAS DE CONTROLE (PLAY, PAUSE, NEXT, PREVIOUS)
 // ==========================================================
 
-// Rota para Tocar/Retomar
 app.post('/play', async (req, res) => {
   try {
     await spotifyApi.play();
@@ -87,7 +81,6 @@ app.post('/play', async (req, res) => {
   }
 });
 
-// Rota para Pausar
 app.post('/pause', async (req, res) => {
   try {
     await spotifyApi.pause();
@@ -97,7 +90,6 @@ app.post('/pause', async (req, res) => {
   }
 });
 
-// Rota para Próxima Faixa
 app.post('/next', async (req, res) => {
   try {
     await spotifyApi.skipToNext();
@@ -107,7 +99,6 @@ app.post('/next', async (req, res) => {
   }
 });
 
-// Rota para Faixa Anterior (o Spotify usa "skipToPrevious" para voltar)
 app.post('/previous', async (req, res) => {
   try {
     await spotifyApi.skipToPrevious();
@@ -116,6 +107,17 @@ app.post('/previous', async (req, res) => {
     res.status(500).send(`Erro ao voltar: ${err.message}`);
   }
 });
+
+// ==========================================================
+// NOVA ROTA: REVOGAÇÃO DO TOKEN (Limpa a memória)
+// ==========================================================
+
+app.post('/revoke', (req, res) => {
+  spotifyApi.setAccessToken(null);
+  spotifyApi.setRefreshToken(null);
+  res.status(200).send('Tokens Revoked');
+});
+
 
 // Inicializa o servidor
 app.listen(port, () => {

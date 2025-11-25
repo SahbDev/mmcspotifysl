@@ -1,73 +1,65 @@
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
+const path = require('path');
+
 const app = express();
-const port = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 
-// Configuração da API (Pega as senhas do Render)
+// Configuração do Spotify - USE SUAS CREDENCIAIS AQUI
 const spotifyApi = new SpotifyWebApi({
-  clientId: process.env.SPOTIFY_CLIENT_ID,
-  clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
-  redirectUri: process.env.SPOTIFY_REDIRECT_URI
+  clientId: 'bb4c46d3e3e549bb9ebf5007e89a5c9e',
+  clientSecret: 'f1090563300d4a598dbb711d39255499',
+  redirectUri: process.env.REDIRECT_URI || 'http://localhost:3000/callback'
 });
 
-// Rota 1: Iniciar Login (Você clica aqui uma vez para autorizar)
+// Vamos armazenar a música atual aqui
+let currentTrack = {
+  is_playing: false,
+  track: 'Nenhuma música',
+  artist: 'Nenhum artista',
+  album: '',
+  error: false
+};
+
+// Configurar o Express
+app.use(express.static('public'));
+app.use(express.json());
+
+// ================= ROTAS BÁSICAS =================
+
+// Rota 1: Página inicial
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+});
+
+// Rota 2: Login com Spotify
 app.get('/login', (req, res) => {
-  const scopes = ['user-read-playback-state', 'user-read-currently-playing'];
-  res.redirect(spotifyApi.createAuthorizeURL(scopes));
+  const scopes = ['user-read-currently-playing', 'user-read-playback-state'];
+  const authUrl = spotifyApi.createAuthorizeURL(scopes);
+  res.redirect(authUrl);
 });
 
-// Rota 2: Callback (Onde o Spotify te devolve e te mostra o Refresh Token)
-app.get('/callback', async (req, res) => {
-  const error = req.query.error;
-  const code = req.query.code;
-
-  if (error) {
-    console.error('Erro:', error);
-    res.send(`Erro: ${error}`);
-    return;
-  }
-
-  try {
-    const data = await spotifyApi.authorizationCodeGrant(code);
-    const refreshToken = data.body['refresh_token'];
-    
-    // Mostra o token na tela para você copiar
-    res.send(`
-      <h1>Sucesso!</h1>
-      <p>Copie este Refresh Token e coloque nas variáveis do Render:</p>
-      <code style="background:#eee;padding:10px;display:block;">${refreshToken}</code>
-    `);
-  } catch (err) {
-    res.send('Erro ao pegar token: ' + err);
-  }
+// Rota 3: Dados para o Second Life
+app.get('/current-track', (req, res) => {
+  res.json({
+    success: true,
+    ...currentTrack,
+    timestamp: Date.now()
+  });
 });
 
-// Rota 3: O que o Second Life vai chamar
-app.get('/tocando', async (req, res) => {
-  try {
-    // Configura o refresh token salvo no Render
-    spotifyApi.setRefreshToken(process.env.SPOTIFY_REFRESH_TOKEN);
-    
-    // Renova o token de acesso (pois ele expira rápido)
-    const data = await spotifyApi.refreshAccessToken();
-    spotifyApi.setAccessToken(data.body['access_token']);
-
-    // Pega a música tocando agora
-    const currentTrack = await spotifyApi.getMyCurrentPlayingTrack();
-
-    if (currentTrack.body && currentTrack.body.is_playing) {
-      const artista = currentTrack.body.item.artists[0].name;
-      const musica = currentTrack.body.item.name;
-      res.send(`${artista} - ${musica}`);
-    } else {
-      res.send("Pausado ou Parado");
-    }
-  } catch (err) {
-    console.error(err);
-    res.send("Erro ao conectar Spotify");
-  }
+// Rota 4: Status do serviço
+app.get('/status', (req, res) => {
+  res.json({
+    online: true,
+    message: 'Servidor Spotify funcionando!',
+    ...currentTrack
+  });
 });
 
-app.listen(port, () => {
-  console.log(`Servidor rodando na porta ${port}`);
+// ================= INICIAR SERVIDOR =================
+app.listen(PORT, () => {
+  console.log(`🎵 Servidor Spotify rodando na porta ${PORT}`);
+  console.log(`🌐 Acesse: http://localhost:${PORT}`);
+  console.log(`📡 URL para SL: http://localhost:${PORT}/current-track`);
 });

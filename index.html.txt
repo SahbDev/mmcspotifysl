@@ -1,0 +1,10 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Spotify para Second Life</title>
+</head>
+<body>
+    <h1>Configuração do Spotify</h1>
+    <p>Página inicial - vamos construir passo a passo</p>
+</body>
+</html>

@@ -1,11 +1,10 @@
-// server.js (VERSÃO CORRIGIDA - ID DE USUÁRIO FIXADO)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const port = process.env.PORT || 3000;
 const app = express();
 
-// --- BANCO DE DADOS DE USUÁRIOS (MEMÓRIA) ---
+// MEMÓRIA VOLÁTIL (Guarda os tokens por usuário)
 const userTokens = {}; 
 
 function getSpotifyClient() {
@@ -16,52 +15,38 @@ function getSpotifyClient() {
   });
 }
 
-// ==================================================================
-// ROTA DE LOGIN (CORREÇÃO AQUI: Passagem correta do ID)
-// ==================================================================
+// --- LOGIN ---
 app.get('/login', (req, res) => {
   const userID = req.query.user;
-  
-  if (!userID) return res.send('<h1 style="color:white; background:#222; padding:20px;">Erro: ID do avatar nao encontrado. Tente novamente pelo Second Life.</h1>');
-
+  // Passa o ID do usuário como 'state' para recuperar depois
+  const options = { state: userID || 'unknown', showDialog: true };
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
-  const spotifyApi = getSpotifyClient();
-  
-  // CORREÇÃO: Passamos o userID diretamente como string no segundo parametro (state)
-  // Isso garante que o Spotify devolva esse ID exato no callback
-  var authorizeURL = spotifyApi.createAuthorizeURL(scopes, userID);
-  
-  // Adicionamos manualmente o parametro para forçar a tela de 'Aceito'
-  res.redirect(authorizeURL + "&show_dialog=true");
+  res.redirect(getSpotifyClient().createAuthorizeURL(scopes, options));
 });
 
-// ==================================================================
-// ROTA DE CALLBACK (Salva o token no ID certo)
-// ==================================================================
+// --- CALLBACK (VISUAL CORRETO COM FOTO) ---
 app.get('/callback', async (req, res) => {
-  const { code, state } = req.query; 
-  const userID = state; // Agora o state É o userID correto (ex: a2b4...)
-
-  if (!userID) return res.send('Erro: Identificação de usuário perdida.');
+  const { code, state } = req.query;
+  const userID = state; // O ID do avatar volta aqui
 
   try {
     const spotifyApi = getSpotifyClient();
     const data = await spotifyApi.authorizationCodeGrant(code);
     
-    // SALVA OS TOKENS EXATAMENTE NO ID DO AVATAR
-    userTokens[userID] = {
-      accessToken: data.body.access_token,
-      refreshToken: data.body.refresh_token,
-      expiresAt: Date.now() + (data.body.expires_in * 1000)
-    };
+    if (userID && userID !== 'unknown') {
+        userTokens[userID] = {
+          accessToken: data.body.access_token,
+          refreshToken: data.body.refresh_token,
+          expiresAt: Date.now() + (data.body.expires_in * 1000)
+        };
+    }
 
-    // HTML VISUAL
-    const successHtml = `
+    // SEU HTML VISUAL APROVADO
+    res.send(`
 <!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Spotify Connection Success</title>
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Raleway:wght@300;400;600&display=swap');
     @keyframes breathe { 0% { opacity: 0.9; } 50% { opacity: 1; } 100% { opacity: 0.9; } }
@@ -85,18 +70,15 @@ app.get('/callback', async (req, res) => {
   <p class="instruction">Click on your player to change tracks, pause, customize colors and more.</p>
   <footer>MMC - Spotify Player Plug-in Created by Saori Suki</footer>
 </body>
-</html>
-    `;
-    res.send(successHtml);
+</html>`);
   } catch (err) {
-    res.send(`<h1>Erro ao conectar: ${err.message}</h1>`);
+    res.send(`<h1>Erro: ${err.message}</h1>`);
   }
 });
 
-// --- FUNÇÃO AUXILIAR: Recupera o cliente do usuário certo ---
+// --- FUNÇÃO DE SUPORTE AO TOKEN ---
 async function getUserClient(userID) {
   if (!userID || !userTokens[userID]) return null;
-
   const spotifyApi = getSpotifyClient();
   spotifyApi.setAccessToken(userTokens[userID].accessToken);
   spotifyApi.setRefreshToken(userTokens[userID].refreshToken);
@@ -107,26 +89,18 @@ async function getUserClient(userID) {
       userTokens[userID].accessToken = data.body.access_token;
       userTokens[userID].expiresAt = Date.now() + (data.body.expires_in * 1000);
       spotifyApi.setAccessToken(data.body.access_token);
-    } catch (err) {
-      return null;
-    }
+    } catch (err) { return null; }
   }
   return spotifyApi;
 }
 
-// ==================================================================
-// ROTA DE STATUS (TOCANDO) - Com proteção anti-erro
-// ==================================================================
+// --- STATUS ---
 app.get('/tocando', async (req, res) => {
   const userID = req.query.user;
-  
-  // Se não tem login, retorna status desconectado (NÃO ERRO 500)
-  if (!userID || !userTokens[userID]) {
-    return res.json({ status: "disconnected" }); 
-  }
-
   const spotifyApi = await getUserClient(userID);
-  if (!spotifyApi) return res.json({ status: "disconnected" }); 
+
+  // SE NÃO TIVER TOKEN, RETORNA "DISCONNECTED" (Não erro)
+  if (!spotifyApi) return res.json({ status: "disconnected" });
 
   try {
     const data = await spotifyApi.getMyCurrentPlaybackState();
@@ -142,16 +116,15 @@ app.get('/tocando', async (req, res) => {
       res.json({ status: "paused" });
     }
   } catch (err) {
-    // Se der erro no Spotify, dizemos que está pausado ou desconectado, mas sem quebrar o servidor
     res.json({ status: "paused" });
   }
 });
 
-// ROTAS DE CONTROLE
+// --- CONTROLES ---
 const handleControl = async (req, res, action) => {
   const userID = req.query.user;
   const spotifyApi = await getUserClient(userID);
-  if (!spotifyApi) return res.sendStatus(401); 
+  if (!spotifyApi) return res.sendStatus(401);
 
   try {
     if (action === 'play') await spotifyApi.play();
@@ -159,9 +132,7 @@ const handleControl = async (req, res, action) => {
     if (action === 'next') await spotifyApi.skipToNext();
     if (action === 'previous') await spotifyApi.skipToPrevious();
     res.status(200).send('OK');
-  } catch (err) {
-    res.status(500).send('Error');
-  }
+  } catch (err) { res.status(200).send('OK'); }
 };
 
 app.post('/play', (req, res) => handleControl(req, res, 'play'));

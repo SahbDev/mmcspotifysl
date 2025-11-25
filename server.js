@@ -1,9 +1,17 @@
-// server.js (VERSÃO FINAL CORRIGIDA - SEM LOOPING)
+// server.js (VERSÃO DEFINITIVA - SEM LOOPING)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const port = process.env.PORT || 3000;
 const app = express();
+
+// ⚠️ IMPORTANTE: Habilita CORS para evitar bloqueios
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  next();
+});
 
 const userTokens = {}; 
 
@@ -18,13 +26,12 @@ function getSpotifyClient() {
 // --- LOGIN ---
 app.get('/login', (req, res) => {
   const userID = req.query.user;
-  // Passa o ID do usuário para recuperar depois
   const options = { state: userID || 'unknown', showDialog: true };
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   res.redirect(getSpotifyClient().createAuthorizeURL(scopes, options));
 });
 
-// --- CALLBACK (VISUAL CORRETO) ---
+// --- CALLBACK ---
 app.get('/callback', async (req, res) => {
   const { code, state } = req.query;
   const userID = state; 
@@ -39,9 +46,9 @@ app.get('/callback', async (req, res) => {
           refreshToken: data.body.refresh_token,
           expiresAt: Date.now() + (data.body.expires_in * 1000)
         };
+        console.log(`✅ Usuário ${userID} conectado ao Spotify`);
     }
 
-    // HTML VISUAL (Sua versão aprovada)
     res.send(`
 <!DOCTYPE html>
 <html>
@@ -72,13 +79,18 @@ app.get('/callback', async (req, res) => {
 </body>
 </html>`);
   } catch (err) {
+    console.error('❌ Erro no callback:', err.message);
     res.send(`<h1>Erro: ${err.message}</h1>`);
   }
 });
 
 // --- FUNÇÃO DE TOKEN ---
 async function getUserClient(userID) {
-  if (!userID || !userTokens[userID]) return null;
+  if (!userID || !userTokens[userID]) {
+    console.log(`❌ Usuário ${userID} não encontrado ou sem token`);
+    return null;
+  }
+  
   const spotifyApi = getSpotifyClient();
   spotifyApi.setAccessToken(userTokens[userID].accessToken);
   spotifyApi.setRefreshToken(userTokens[userID].refreshToken);
@@ -89,53 +101,62 @@ async function getUserClient(userID) {
       userTokens[userID].accessToken = data.body.access_token;
       userTokens[userID].expiresAt = Date.now() + (data.body.expires_in * 1000);
       spotifyApi.setAccessToken(data.body.access_token);
-    } catch (err) { return null; }
+      console.log(`🔄 Token atualizado para usuário ${userID}`);
+    } catch (err) { 
+      console.log(`❌ Erro ao atualizar token para ${userID}:`, err.message);
+      return null; 
+    }
   }
   return spotifyApi;
 }
 
-// --- STATUS (CORREÇÃO AQUI) ---
+// --- STATUS ---
 app.get('/tocando', async (req, res) => {
   const userID = req.query.user;
-  const spotifyApi = await getUserClient(userID);
+  console.log(`📊 Verificando status para usuário: ${userID}`);
+  
+  // ⚠️ CRÍTICO: Se não tem userID, retorna disconnected
+  if (!userID) {
+    console.log('❌ UserID não fornecido');
+    return res.json({ status: "disconnected" });
+  }
 
-  // Se não tem login, retorna status DISCONNECTED (importante para o LSL saber)
-  if (!spotifyApi) return res.json({ status: "disconnected" });
+  const spotifyApi = await getUserClient(userID);
+  
+  if (!spotifyApi) {
+    console.log(`❌ Spotify API não disponível para ${userID}`);
+    return res.json({ status: "disconnected" });
+  }
 
   try {
     const data = await spotifyApi.getMyCurrentPlaybackState();
+    console.log(`🎵 Dados do Spotify para ${userID}:`, data.body ? 'Com dados' : 'Sem dados');
     
-    // Se estiver tocando algo
-    if (data.body && data.body.is_playing) {
-      res.json({
-        status: "playing",
-        musica: data.body.item.name,
-        artista: data.body.item.artists.map(a => a.name).join(', '),
-        progresso_ms: data.body.progress_ms,
-        duracao_ms: data.body.item.duration_ms
-      });
-    } else if (data.body && data.body.item) {
-      // Tem dados mas está pausado
-      res.json({ 
-        status: "paused",
-        musica: data.body.item.name,
-        artista: data.body.item.artists.map(a => a.name).join(', '),
-        progresso_ms: data.body.progress_ms,
-        duracao_ms: data.body.item.duration_ms
-      });
+    if (data.body && data.body.item) {
+      const response = {
+        status: data.body.is_playing ? "playing" : "paused",
+        musica: data.body.item.name || "Unknown",
+        artista: data.body.item.artists.map(a => a.name).join(', ') || "Unknown Artist",
+        progresso_ms: data.body.progress_ms || 0,
+        duracao_ms: data.body.item.duration_ms || 0
+      };
+      console.log(`✅ Retornando: ${response.status} - ${response.artista} - ${response.musica}`);
+      return res.json(response);
     } else {
-      // Não está tocando nada
-      res.json({ status: "paused" });
+      console.log(`⏸️ Nenhuma música tocando para ${userID}`);
+      return res.json({ status: "paused" });
     }
   } catch (err) {
-    // Se der erro na API, assume desconectado
-    res.json({ status: "disconnected" });
+    console.error(`❌ Erro na API Spotify para ${userID}:`, err.message);
+    return res.json({ status: "disconnected" });
   }
 });
 
 // --- CONTROLES ---
 const handleControl = async (req, res, action) => {
   const userID = req.query.user;
+  console.log(`🎮 Controle ${action} para usuário: ${userID}`);
+  
   const spotifyApi = await getUserClient(userID);
   if (!spotifyApi) return res.sendStatus(401);
 
@@ -144,8 +165,13 @@ const handleControl = async (req, res, action) => {
     if (action === 'pause') await spotifyApi.pause();
     if (action === 'next') await spotifyApi.skipToNext();
     if (action === 'previous') await spotifyApi.skipToPrevious();
+    
+    console.log(`✅ Comando ${action} executado para ${userID}`);
     res.status(200).send('OK');
-  } catch (err) { res.status(500).send('Error'); }
+  } catch (err) { 
+    console.error(`❌ Erro no comando ${action} para ${userID}:`, err.message);
+    res.status(500).send('Error'); 
+  }
 };
 
 app.post('/play', (req, res) => handleControl(req, res, 'play'));
@@ -155,8 +181,14 @@ app.post('/previous', (req, res) => handleControl(req, res, 'previous'));
 
 app.post('/revoke', (req, res) => {
   const userID = req.query.user;
-  if (userTokens[userID]) delete userTokens[userID];
+  if (userTokens[userID]) {
+    delete userTokens[userID];
+    console.log(`🗑️ Token revogado para usuário ${userID}`);
+  }
   res.status(200).send('Revoked');
 });
 
-app.listen(port, () => { console.log(`Server running`); });
+app.listen(port, () => { 
+  console.log(`🚀 Server running on port ${port}`);
+  console.log(`✅ Spotify Client ID: ${process.env.SPOTIFY_CLIENT_ID ? 'Configurado' : 'Não configurado'}`);
+});

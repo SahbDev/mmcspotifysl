@@ -12,21 +12,21 @@ const spotifyApi = new SpotifyWebApi({
 
 const app = express();
 
-// ==========================================================
-// ROTA DE LOGIN CORRIGIDA PARA FORÇAR A TELA DE PERMISSÃO
-// ==========================================================
+// Rota de Login (Forçando o showDialog para segurança)
 app.get('/login', (req, res) => {
   const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
   
   const options = {
     state: 'state',
-    showDialog: true // <--- ISSO FORÇA A TELA DE CONSENTIMENTO
+    showDialog: true 
   };
   
   res.redirect(spotifyApi.createAuthorizeURL(scopes, options));
 });
 
-// Rota de Callback
+// ==========================================================
+// ROTA DE CALLBACK COM NOVO VISUAL E ESTILO (FUNDO ESCURO, FONTE BRANCA)
+// ==========================================================
 app.get('/callback', async (req, res) => {
   const { code } = req.query;
   try {
@@ -36,7 +36,28 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setAccessToken(access_token);
     spotifyApi.setRefreshToken(refresh_token);
 
-    res.send('<h1>Conectado! Pode fechar.</h1>');
+    // HTML personalizado com cores ajustadas para branco
+    const successHtml = `
+      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+        
+        <h1 style="color: white; font-size: 48px; margin-bottom: 20px;">
+          You are now ready to press play <span style="font-size: 0.8em;">&lt;3</span>
+        </h1>
+        
+        <p style="font-size: 24px;">
+          Your Spotify Player is ready to use !
+        </p>
+        <p style="font-size: 18px; color: white;"> 
+          You can now close this tab. Thank you!
+        </p>
+        
+        <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: #555;">
+          MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
+        </footer>
+      </body>
+    `;
+
+    res.send(successHtml);
   } catch (err) {
     res.send(`<h1>Erro ao conectar: ${err.message}</h1>`);
   }

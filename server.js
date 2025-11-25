@@ -1,18 +1,16 @@
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
-const path = require('path');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração do Spotify - USE SUAS CREDENCIAIS AQUI
+// Configuração do Spotify - USE SUAS CREDENCIAIS
 const spotifyApi = new SpotifyWebApi({
   clientId: 'bb4c46d3e3e549bb9ebf5007e89a5c9e',
   clientSecret: 'f1090563300d4a598dbb711d39255499',
-  redirectUri: process.env.REDIRECT_URI || 'http://localhost:3000/callback'
+  redirectUri: process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback'
 });
 
-// Vamos armazenar a música atual aqui
+// Estado da aplicação
 let currentTrack = {
   is_playing: false,
   track: 'Nenhuma música',
@@ -21,25 +19,146 @@ let currentTrack = {
   error: false
 };
 
-// Configurar o Express
+let spotifyTokens = {
+  accessToken: '',
+  refreshToken: '',
+  expiresAt: 0
+};
+
+// Middleware
 app.use(express.static('public'));
 app.use(express.json());
 
-// ================= ROTAS BÁSICAS =================
+// ================= ROTAS =================
 
-// Rota 1: Página inicial
+// Página inicial
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.send(`
+    <html>
+      <head>
+        <title>Spotify para Second Life</title>
+        <style>
+          body { 
+            font-family: Arial; 
+            text-align: center; 
+            padding: 50px;
+            background: linear-gradient(135deg, #1DB954, #191414);
+            color: white;
+          }
+          .container {
+            background: rgba(255,255,255,0.1);
+            padding: 30px;
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+          }
+          .button {
+            background: #1DB954;
+            color: white;
+            padding: 15px 30px;
+            text-decoration: none;
+            border-radius: 25px;
+            display: inline-block;
+            margin: 10px;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="container">
+          <h1>🎵 Spotify para Second Life</h1>
+          <p>Conecte sua conta do Spotify para mostrar a música atual no Second Life</p>
+          
+          <a href="/login" class="button">🔗 Conectar com Spotify</a>
+          
+          <div style="margin-top: 30px;">
+            <p><strong>URL para o Second Life:</strong></p>
+            <code>https://mmcspotifysl.onrender.com/current-track</code>
+          </div>
+        </div>
+      </body>
+    </html>
+  `);
 });
 
-// Rota 2: Login com Spotify
+// Login com Spotify
 app.get('/login', (req, res) => {
   const scopes = ['user-read-currently-playing', 'user-read-playback-state'];
   const authUrl = spotifyApi.createAuthorizeURL(scopes);
   res.redirect(authUrl);
 });
 
-// Rota 3: Dados para o Second Life
+// Callback do Spotify
+app.get('/callback', async (req, res) => {
+  const { code, error } = req.query;
+
+  if (error) {
+    console.error('Erro no callback:', error);
+    return res.status(400).send(`Erro na autenticação: ${error}`);
+  }
+
+  try {
+    console.log('Trocando código por token...');
+    const data = await spotifyApi.authorizationCodeGrant(code);
+    
+    const { access_token, refresh_token, expires_in } = data.body;
+    
+    // Salvar tokens
+    spotifyTokens = {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      expiresAt: Date.now() + (expires_in * 1000)
+    };
+    
+    spotifyApi.setAccessToken(access_token);
+    spotifyApi.setRefreshToken(refresh_token);
+    
+    console.log('✅ Autenticação realizada com sucesso!');
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Autenticação Concluída</title>
+        <style>
+          body { 
+            font-family: Arial, sans-serif; 
+            text-align: center; 
+            padding: 50px; 
+            background: linear-gradient(135deg, #1DB954, #191414);
+            color: white;
+          }
+          .success { 
+            background: rgba(255,255,255,0.1); 
+            padding: 30px; 
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+          }
+        </style>
+      </head>
+      <body>
+        <div class="success">
+          <h1>🎵 Autenticação Concluída!</h1>
+          <p>Seu Spotify foi conectado com sucesso ao Second Life.</p>
+          <p>Você pode fechar esta janela e voltar para o Second Life.</p>
+          <p><small>O sistema começará a atualizar automaticamente.</small></p>
+        </div>
+        <script>
+          setTimeout(() => window.close(), 3000);
+        </script>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error('❌ Erro na autenticação:', error);
+    res.status(500).send(`
+      <h1>Erro na Autenticação</h1>
+      <p>${error.message}</p>
+      <a href="/">Tentar novamente</a>
+    `);
+  }
+});
+
+// Rota para o Second Life buscar dados
 app.get('/current-track', (req, res) => {
   res.json({
     success: true,
@@ -48,11 +167,11 @@ app.get('/current-track', (req, res) => {
   });
 });
 
-// Rota 4: Status do serviço
+// Status do serviço
 app.get('/status', (req, res) => {
   res.json({
+    authenticated: !!spotifyTokens.accessToken,
     online: true,
-    message: 'Servidor Spotify funcionando!',
     ...currentTrack
   });
 });
@@ -60,6 +179,5 @@ app.get('/status', (req, res) => {
 // ================= INICIAR SERVIDOR =================
 app.listen(PORT, () => {
   console.log(`🎵 Servidor Spotify rodando na porta ${PORT}`);
-  console.log(`🌐 Acesse: http://localhost:${PORT}`);
-  console.log(`📡 URL para SL: http://localhost:${PORT}/current-track`);
+  console.log(`📡 URL para SL: https://mmcspotifysl.onrender.com/current-track`);
 });

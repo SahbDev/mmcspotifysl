@@ -48,7 +48,7 @@ async function refreshAccessToken() {
   }
 }
 
-// **FUNÇÃO ATUALIZADA - AGORA COM progress e duration**
+// Função para buscar música atual
 async function updateCurrentTrack() {
   if (!spotifyTokens.accessToken) return;
 
@@ -62,8 +62,6 @@ async function updateCurrentTrack() {
     if (playback.body && playback.body.item) {
       const track = playback.body.item;
       const isPlaying = playback.body.is_playing;
-      
-      // **DADOS DE PROGRESSO ADICIONADOS AQUI**
       const progress = playback.body.progress_ms || 0;
       const duration = track.duration_ms || 0;
       
@@ -72,12 +70,12 @@ async function updateCurrentTrack() {
         track: track.name,
         artist: track.artists.map(artist => artist.name).join(', '),
         album: track.album.name,
-        progress: progress,        // ✅ AGORA ENVIA PROGRESSO
-        duration: duration,        // ✅ AGORA ENVIA DURAÇÃO
+        progress: progress,
+        duration: duration,
         error: false
       };
       
-      console.log(`🎵 ${currentTrack.track} - Progresso: ${progress}ms/${duration}ms`);
+      console.log(`🎵 ${currentTrack.track} - ${currentTrack.artist} (${Math.round(progress/1000)}s/${Math.round(duration/1000)}s)`);
     } else {
       currentTrack = {
         is_playing: false,
@@ -102,63 +100,97 @@ function startTrackUpdater() {
 
 // ================= ROTAS =================
 
+// Página inicial - COM SEU LAYOUT
 app.get('/', (req, res) => {
   res.send(`
-    <html>
-      <head>
-        <title>Spotify para Second Life</title>
-        <style>
-          body { 
-            font-family: Arial; 
-            text-align: center; 
-            padding: 50px;
-            background: linear-gradient(135deg, #1DB954, #191414);
-            color: white;
-          }
-          .container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-          }
-          .button {
-            background: #1DB954;
-            color: white;
-            padding: 15px 30px;
-            text-decoration: none;
-            border-radius: 25px;
-            display: inline-block;
-            margin: 10px;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="container">
-          <h1>🎵 Spotify para Second Life</h1>
-          <p>Conecte sua conta do Spotify</p>
-          <a href="/login" class="button">🔗 Conectar com Spotify</a>
-          <div style="margin-top: 30px;">
-            <p><strong>URL para Second Life:</strong></p>
-            <code>https://mmcspotifysl.onrender.com/current-track</code>
-          </div>
-        </div>
-      </body>
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>MMC - Spotify Player</title>
+    </head>
+    <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+        
+        <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
+          MMC - Spotify Player
+        </h2>
+        
+        <h1 style="color: white; font-size: 36px; margin-bottom: 30px;">
+          Connect your Spotify Account
+        </h1>
+        
+        <a href="/login" style="
+          background: #1DB954; 
+          color: white; 
+          padding: 15px 30px; 
+          text-decoration: none; 
+          border-radius: 25px; 
+          font-size: 18px;
+          display: inline-block;
+          margin: 20px;">
+          🔗 Connect Spotify
+        </a>
+        
+        <p style="font-size: 16px; color: #ccc; margin-top: 40px;">
+          URL for Second Life: <code style="background: #333; padding: 5px 10px; border-radius: 5px;">https://mmcspotifysl.onrender.com/current-track</code>
+        </p>
+        
+        <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
+          MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
+        </footer>
+
+    </body>
     </html>
   `);
 });
 
+// Login com Spotify
 app.get('/login', (req, res) => {
   const scopes = ['user-read-currently-playing', 'user-read-playback-state'];
   const authUrl = spotifyApi.createAuthorizeURL(scopes);
   res.redirect(authUrl);
 });
 
+// Callback do Spotify - COM SEU LAYOUT
 app.get('/callback', async (req, res) => {
   const { code, error } = req.query;
 
   if (error) {
     console.error('Erro no callback:', error);
-    return res.status(400).send(`Erro na autenticação: ${error}`);
+    return res.status(400).send(`
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>MMC - Spotify Player - Erro</title>
+      </head>
+      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+          
+          <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
+            MMC - Spotify Player
+          </h2>
+          
+          <h1 style="color: #ff4444; font-size: 48px; margin-bottom: 20px;">
+            Erro na Autenticação
+          </h1>
+          
+          <p style="font-size: 24px;">
+            ${error}
+          </p>
+          
+          <p style="font-size: 18px; color: white;"> 
+            <a href="/" style="color: #1DB954;">Tentar novamente</a>
+          </p>
+          
+          <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
+            MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
+          </footer>
+
+      </body>
+      </html>
+    `);
   }
 
   try {
@@ -179,36 +211,37 @@ app.get('/callback', async (req, res) => {
     console.log('✅ Autenticação realizada com sucesso!');
     startTrackUpdater();
     
+    // SEU HTML PERSONALIZADO
     res.send(`
       <!DOCTYPE html>
-      <html>
+      <html lang="en">
       <head>
-        <title>Autenticação Concluída</title>
-        <style>
-          body { 
-            font-family: Arial, sans-serif; 
-            text-align: center; 
-            padding: 50px; 
-            background: linear-gradient(135deg, #1DB954, #191414);
-            color: white;
-          }
-          .success { 
-            background: rgba(255,255,255,0.1); 
-            padding: 30px; 
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
-          }
-        </style>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>MMC - Spotify Player</title>
       </head>
-      <body>
-        <div class="success">
-          <h1>🎵 Autenticação Concluída!</h1>
-          <p>Seu Spotify foi conectado com sucesso ao Second Life.</p>
-          <p>Você pode fechar esta janela e voltar para o Second Life.</p>
-        </div>
-        <script>
-          setTimeout(() => window.close(), 3000);
-        </script>
+      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+          
+          <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
+            MMC - Spotify Player
+          </h2>
+          
+          <h1 style="color: white; font-size: 48px; margin-bottom: 20px;">
+            You are now ready to press play <span style="font-size: 0.8em;">&lt;3</span>
+          </h1>
+          
+          <p style="font-size: 24px;">
+            Your Spotify Player is ready to use !
+          </p>
+          
+          <p style="font-size: 18px; color: white;"> 
+            You can now close this tab. Thank you!
+          </p>
+          
+          <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
+            MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
+          </footer>
+
       </body>
       </html>
     `);
@@ -216,13 +249,42 @@ app.get('/callback', async (req, res) => {
   } catch (error) {
     console.error('❌ Erro na autenticação:', error);
     res.status(500).send(`
-      <h1>Erro na Autenticação</h1>
-      <p>${error.message}</p>
-      <a href="/">Tentar novamente</a>
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>MMC - Spotify Player - Erro</title>
+      </head>
+      <body style="margin: 0; background-color: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+          
+          <h2 style="font-size: 32px; color: white; margin-bottom: 10px;">
+            MMC - Spotify Player
+          </h2>
+          
+          <h1 style="color: #ff4444; font-size: 48px; margin-bottom: 20px;">
+            Erro na Autenticação
+          </h1>
+          
+          <p style="font-size: 24px;">
+            ${error.message}
+          </p>
+          
+          <p style="font-size: 18px; color: white;"> 
+            <a href="/" style="color: #1DB954;">Tentar novamente</a>
+          </p>
+          
+          <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
+            MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User
+          </footer>
+
+      </body>
+      </html>
     `);
   }
 });
 
+// Rota para o Second Life buscar dados
 app.get('/current-track', (req, res) => {
   res.json({
     success: true,
@@ -231,6 +293,7 @@ app.get('/current-track', (req, res) => {
   });
 });
 
+// Status do serviço
 app.get('/status', (req, res) => {
   res.json({
     authenticated: !!spotifyTokens.accessToken,
@@ -239,7 +302,8 @@ app.get('/status', (req, res) => {
   });
 });
 
+// ================= INICIAR SERVIDOR =================
 app.listen(PORT, () => {
-  console.log(`🎵 Servidor rodando na porta ${PORT}`);
+  console.log(`🎵 Servidor Spotify rodando na porta ${PORT}`);
   console.log(`📡 URL para SL: https://mmcspotifysl.onrender.com/current-track`);
 });

@@ -16,6 +16,8 @@ let currentTrack = {
   track: 'Nenhuma música',
   artist: 'Nenhum artista',
   album: '',
+  progress: 0,
+  duration: 0,
   error: false
 };
 
@@ -62,22 +64,28 @@ async function updateCurrentTrack() {
     if (playback.body && playback.body.item) {
       const track = playback.body.item;
       const isPlaying = playback.body.is_playing;
+      const progress = playback.body.progress_ms || 0;
+      const duration = track.duration_ms || 0;
       
       currentTrack = {
         is_playing: isPlaying,
         track: track.name,
         artist: track.artists.map(artist => artist.name).join(', '),
         album: track.album.name,
+        progress: progress,
+        duration: duration,
         error: false
       };
       
-      console.log(`🎵 Tocando: ${currentTrack.track} - ${currentTrack.artist}`);
+      console.log(`🎵 ${currentTrack.track} - ${currentTrack.artist} (${Math.round(progress/1000)}s/${Math.round(duration/1000)}s)`);
     } else {
       currentTrack = {
         is_playing: false,
         track: 'Nada tocando',
         artist: '',
         album: '',
+        progress: 0,
+        duration: 0,
         error: false
       };
     }
@@ -87,13 +95,10 @@ async function updateCurrentTrack() {
   }
 }
 
-// Iniciar atualização automática a cada 5 segundos
+// Iniciar atualização automática a cada 3 segundos
 function startTrackUpdater() {
-  // Atualizar imediatamente
   updateCurrentTrack();
-  
-  // Atualizar a cada 5 segundos
-  setInterval(updateCurrentTrack, 5000);
+  setInterval(updateCurrentTrack, 3000);
 }
 
 // ================= ROTAS =================
@@ -168,7 +173,6 @@ app.get('/callback', async (req, res) => {
     
     const { access_token, refresh_token, expires_in } = data.body;
     
-    // Salvar tokens
     spotifyTokens = {
       accessToken: access_token,
       refreshToken: refresh_token,
@@ -179,8 +183,6 @@ app.get('/callback', async (req, res) => {
     spotifyApi.setRefreshToken(refresh_token);
     
     console.log('✅ Autenticação realizada com sucesso!');
-    
-    // INICIAR ATUALIZAÇÃO AUTOMÁTICA DAS MÚSICAS
     startTrackUpdater();
     
     res.send(`

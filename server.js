@@ -129,12 +129,8 @@ app.get('/', (req, res) => {
           font-size: 18px;
           display: inline-block;
           margin: 20px;">
-          🔗 Connect Spotify
+          Connect Spotify
         </a>
-        
-        <p style="font-size: 16px; color: #ccc; margin-top: 40px;">
-          URL for Second Life: <code style="background: #333; padding: 5px 10px; border-radius: 5px;">https://mmcspotifysl.onrender.com/current-track</code>
-        </p>
         
         <footer style="position: absolute; bottom: 10px; left: 0; width: 100%; font-size: 10px; color: white;"> 
           MMC - Spotify Player Plug-in Created by Saori Suki, a Second Life User

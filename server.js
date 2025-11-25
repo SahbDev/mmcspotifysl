@@ -3,10 +3,10 @@ const SpotifyWebApi = require('spotify-web-api-node');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configuração do Spotify - USE SUAS CREDENCIAIS
+// Configuração do Spotify - VARIÁVEIS DE AMBIENTE
 const spotifyApi = new SpotifyWebApi({
-  clientId: 'bb4c46d3e3e549bb9ebf5007e89a5c9e',
-  clientSecret: 'f1090563300d4a598dbb711d39255499',
+  clientId: process.env.SPOTIFY_CLIENT_ID || 'bb4c46d3e3e549bb9ebf5007e89a5c9e',
+  clientSecret: process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb711d39255499',
   redirectUri: process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback'
 });
 

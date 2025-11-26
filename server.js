@@ -47,7 +47,6 @@ app.get('/login', (req, res) => {
     }
     
     const spotifyApi = getSpotifyApi();
-    // Adicionadas permissões de controle (user-modify-playback-state)
     const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position', 'user-modify-playback-state'];
     
     const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
@@ -144,7 +143,7 @@ app.get('/current-track', async (req, res) => {
             duration: item.duration_ms
         });
     } catch (err) {
-        res.json({ track: `Error: ${formatError(err).substring(0, 40)}...`, artist: `Check Instructions`, error_code: "API_FAIL" });
+        res.json({ track: `API Error`, artist: `Check Instructions`, error_code: "API_FAIL" });
     }
 });
 
@@ -192,7 +191,6 @@ app.post('/control/:action', async (req, res) => {
         
         // CORREÇÃO CRÍTICA DE SINCRONIA:
         // Após o comando, espera um momento e busca o novo estado de reprodução
-        // Isso garante que o LSL obtenha o estado atualizado imediatamente.
         await new Promise(resolve => setTimeout(resolve, 500)); 
         
         const newPlayback = await spotifyApi.getMyCurrentPlaybackState();
@@ -218,8 +216,14 @@ app.post('/control/:action', async (req, res) => {
         });
         
     } catch (err) {
+        // CORREÇÃO: Retorna um JSON VÁLIDO no formato de erro para o LSL limpar o estado
         console.error(`[CONTROL_FAIL] ${sl_uuid} - ${action}: ${formatError(err)}`);
-        res.status(500).json({ track: `Control Error: ${formatError(err).substring(0, 40)}...`, artist: `Relog HUD`, error_code: "CONTROL_FAIL" });
+        res.status(500).json({ 
+            is_playing: false,
+            track: `Control Error`, 
+            artist: `Device Not Found`, 
+            error_code: "CONTROL_FAIL" 
+        });
     }
 });
 

@@ -1,229 +1,370 @@
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
+const Redis = require('redis');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === CONFIGURAÇÕES ===
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'bb4c46d3e3e549bb9ebf5007e89a5c9e';
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb711d39255499';
-const REDIRECT_URI = process.env.REDIRECT_URI ||
-'https://mmcspotifysl.onrender.com/callback';
+// Configuração Redis
+const redisClient = Redis.createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
 
-// === BANCO DE DADOS NA MEMÓRIA ===
-const usersDB = {}; 
+// Configuração Spotify
+const spotifyConfig = {
+  clientId: process.env.SPOTIFY_CLIENT_ID,
+  clientSecret: process.env.SPOTIFY_CLIENT_SECRET,
+  redirectUri: process.env.REDIRECT_URI
+};
 
-app.use(express.static('public'));
-app.use(express.json());
+// Conectar Redis
+redisClient.on('error', (err) => console.log('Redis Client Error', err));
+(async () => {
+  await redisClient.connect();
+  console.log('✅ Redis conectado');
+})();
 
-function getSpotifyApi() {
-    return new SpotifyWebApi({
-        clientId: CLIENT_ID,
-        clientSecret: CLIENT_SECRET,
-        redirectUri: REDIRECT_URI
+// Map para intervals por usuário
+const userIntervals = new Map();
+
+// ================= FUNÇÕES AUXILIARES =================
+
+// Nova função para criar instância da API com token do Redis
+async function getSpotifyApiForUser(userId) {
+  const sessionData = await redisClient.get(`user:${userId}`);
+  if (!sessionData) return null;
+  
+  const session = JSON.parse(sessionData);
+  
+  // Refresh Token (usando a função existente)
+  if (Date.now() >= session.expiresAt - 60000) {
+    const newToken = await refreshUserToken(userId, session);
+    if (!newToken) return null;
+  }
+  
+  return new SpotifyWebApi({
+    clientId: spotifyConfig.clientId,
+    clientSecret: spotifyConfig.clientSecret,
+    accessToken: session.accessToken // Usar o token atualizado/existente
+  });
+}
+
+// Buscar música do usuário
+async function updateUserTrack(userId) {
+  try {
+    const sessionData = await redisClient.get(`user:${userId}`);
+    if (!sessionData) {
+      console.log(`❌ Sessão não encontrada para: ${userId.slice(0,8)}`);
+      return null;
+    }
+
+    const session = JSON.parse(sessionData);
+    
+    // Verificar token
+    if (Date.now() >= session.expiresAt - 60000) {
+      const newToken = await refreshUserToken(userId, session);
+      if (!newToken) return null;
+    }
+
+    // NOVA instância Spotify para CADA usuário
+    const userSpotifyApi = new SpotifyWebApi({
+      clientId: spotifyConfig.clientId,
+      clientSecret: spotifyConfig.clientSecret,
+      accessToken: session.accessToken
     });
-}
 
-function formatError(err) {
-    try {
-        if (!err) return "Unknown Error";
-        if (err.body) {
-            if (err.body.error_description) return "Spotify: " + err.body.error_description;
-            if (err.body.error && err.body.error.message) return "Spotify: " + err.body.error.message;
-            if (typeof err.body.error === 'string') return "Spotify: " + err.body.error;
-        }
-        if (err.message) return err.message;
-        return JSON.stringify(err).replace(/[{}"]/g, ' '); 
-    } catch (e) {
-        return "Internal Error";
+    const playback = await userSpotifyApi.getMyCurrentPlaybackState();
+    
+    let currentTrack;
+    if (playback.body && playback.body.item && playback.body.is_playing) {
+      const track = playback.body.item;
+      currentTrack = {
+        is_playing: true,
+        track: track.name || 'Música desconhecida',
+        artist: track.artists ? track.artists.map(artist => artist.name).join(', ') : 'Artista desconhecido',
+        progress: playback.body.progress_ms || 0,
+        duration: track.duration_ms || 0,
+        error: false
+      };
+      
+      console.log(`🎵 ${userId.slice(0,8)}: "${currentTrack.track}" - ${currentTrack.artist}`);
+    } else {
+      currentTrack = {
+        is_playing: false,
+        // CORREÇÃO: Usar 'Paused / Idle' para o LSL identificar o estado correto
+        track: (playback.body && playback.body.item) ? 'Paused / Idle' : 'Nada tocando',
+        artist: (playback.body && playback.body.item && playback.body.item.artists) ? playback.body.item.artists.map(artist => artist.name).join(', ') : '',
+        progress: (playback.body && playback.body.progress_ms) ? playback.body.progress_ms : 0,
+        duration: (playback.body && playback.body.item) ? playback.body.item.duration_ms : 0,
+        error: false
+      };
+      console.log(`⏸️ ${userId.slice(0,8)}: Nada tocando`);
     }
+    
+    // Salvar no cache do usuário
+    await redisClient.set(`track:${userId}`, JSON.stringify(currentTrack), { EX: 60 });
+    
+    return currentTrack;
+    
+  } catch (error) {
+    console.error(`❌ Erro para ${userId.slice(0,8)}:`, error.message);
+    
+    await redisClient.set(`track:${userId}`, JSON.stringify({
+      error: true,
+      track: 'Erro de conexão',
+      artist: '',
+      progress: 0,
+      duration: 0
+    }), { EX: 30 });
+    
+    return null;
+  }
 }
 
-// === ROTA 1: LOGIN ===
+// Atualizar token
+async function refreshUserToken(userId, session) {
+  try {
+    const userSpotifyApi = new SpotifyWebApi({
+      clientId: spotifyConfig.clientId,
+      clientSecret: spotifyConfig.clientSecret,
+      refreshToken: session.refreshToken
+    });
+    
+    const data = await userSpotifyApi.refreshAccessToken();
+    const { access_token, expires_in } = data.body;
+    
+    session.accessToken = access_token;
+    session.expiresAt = Date.now() + (expires_in * 1000);
+    
+    await redisClient.set(`user:${userId}`, JSON.stringify(session));
+    
+    console.log(`✅ Token atualizado para: ${userId.slice(0,8)}`);
+    return access_token;
+  } catch (error) {
+    console.error(`❌ Erro ao atualizar token para ${userId.slice(0,8)}:`, error);
+    return null;
+  }
+}
+
+// Iniciar updater para usuário
+function startUserUpdater(userId) {
+  console.log(`🚀 Iniciando updater para: ${userId.slice(0,8)}`);
+  
+  // Atualizar imediatamente
+  updateUserTrack(userId);
+  
+  // Configurar intervalo
+  const intervalId = setInterval(() => updateUserTrack(userId), 3000);
+  userIntervals.set(userId, intervalId);
+}
+
+// ================= ROTAS DE ACESSO =================
+
+app.get('/', (req, res) => {
+  res.send(`
+    <!DOCTYPE html>
+    <html>
+    <head><meta charset="UTF-8"><title>MMC - Spotify Player</title></head>
+    <body style="margin: 0; background: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+      <h2>MMC - Spotify Player</h2>
+      <h1>Connect your Spotify Account</h1>
+      <a href="/login" style="background: #1DB954; color: white; padding: 15px 30px; text-decoration: none; border-radius: 25px; font-size: 18px; display: inline-block; margin: 20px;">
+        Connect Spotify
+      </a>
+      <footer style="position: absolute; bottom: 10px; width: 100%; font-size: 10px;">
+        MMC - Spotify Player Plug-in Created by Saori Suki
+      </footer>
+    </body>
+    </html>
+  `);
+});
+
 app.get('/login', (req, res) => {
-    const sl_uuid = req.query.uuid;
-    
-    if (!sl_uuid) {
-        return res.send("ERROR: UUID missing. Use the HUD.");
-    }
-    
-    const spotifyApi = getSpotifyApi();
-    const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position', 'user-modify-playback-state'];
-    
-    const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
-    
-    res.redirect(authUrl);
+  const { user } = req.query;
+  if (!user) return res.status(400).send('User ID required');
+
+  // Adicionando user-modify-playback-state para controle
+  const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-modify-playback-state'];
+  const state = `user_${user}_${Date.now()}`;
+
+  redisClient.set(`state:${state}`, user, { EX: 300 });
+
+  const spotifyApi = new SpotifyWebApi(spotifyConfig);
+  const authUrl = spotifyApi.createAuthorizeURL(scopes, state);
+  res.redirect(authUrl);
 });
 
-// === ROTA 2: CALLBACK ===
 app.get('/callback', async (req, res) => {
-    const { code, state, error } = req.query;
-    const sl_uuid = state; 
+  const { code, state, error } = req.query;
+  if (error) return res.status(400).send('Authentication error');
 
-    if (error) return res.send(`Error: ${error}`);
-    if (!code || !sl_uuid) return res.send(`Critical Error: Missing data.`);
-    try {
-        const spotifyApi = getSpotifyApi();
-        const data = await spotifyApi.authorizationCodeGrant(code);
-        usersDB[sl_uuid] = {
-            accessToken: data.body.access_token,
-            refreshToken: data.body.refresh_token,
-            expiresAt: Date.now() + (data.body.expires_in * 1000)
-        };
-        console.log(`[LOGIN] Success for: ${sl_uuid}`);
-        
-        res.send(`
-            <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
-                <h1 style="color:#1DB954;">Connected!</h1>
-                <p>Account linked to UUID:<br><b>${sl_uuid}</b></p>
-                <p style="color:#ccc; font-size:12px;">You can close this window.</p>
-            </body>
-        `);
-    } catch (err) {
-        res.send(`Login Failed: ${formatError(err)}`);
+  try {
+    const userId = await redisClient.get(`state:${state}`);
+    if (!userId) return res.status(400).send('Invalid state');
+
+    const userSpotifyApi = new SpotifyWebApi(spotifyConfig);
+    const data = await userSpotifyApi.authorizationCodeGrant(code);
+    const { access_token, refresh_token, expires_in } = data.body;
+    
+    const userSession = {
+      accessToken: access_token,
+      refreshToken: refresh_token,
+      expiresAt: Date.now() + (expires_in * 1000),
+      connectedAt: Date.now()
+    };
+    
+    await redisClient.set(`user:${userId}`, JSON.stringify(userSession));
+    await redisClient.del(`state:${state}`);
+    
+    console.log(`🎉 NOVO USUÁRIO: ${userId}`);
+    
+    // Se o updater já estiver rodando, apenas o deixa, senão inicia.
+    if (!userIntervals.has(userId)) {
+        startUserUpdater(userId);
     }
+    
+    res.send(`
+      <!DOCTYPE html>
+      <html>
+      <head><meta charset="UTF-8"><title>MMC - Spotify Player</title></head>
+      <body style="margin: 0; background: #222; color: white; font-family: sans-serif; text-align: center; padding-top: 100px;">
+        <h2>MMC - Spotify Player</h2>
+        <h1>You are now ready to press play <3</h1>
+        <p>Your Spotify Player is ready to use!</p>
+        <p>You can now close this tab. Thank you!</p>
+        <footer style="position: absolute; bottom: 10px; width: 100%; font-size: 10px;">
+          MMC - Spotify Player Plug-in Created by Saori Suki
+        </footer>
+      </body>
+      </html>
+    `);
+    
+  } catch (error) {
+    console.error('❌ Erro na autenticação:', error);
+    res.status(500).send('Authentication failed');
+  }
 });
 
-// Função Auxiliar para Refresh de Token
-async function refreshAndSetTokens(sl_uuid, spotifyApi) {
-    let user = usersDB[sl_uuid];
-    if (Date.now() >= user.expiresAt - 60000) {
-        try {
-            const data = await spotifyApi.refreshAccessToken();
-            usersDB[sl_uuid].accessToken = data.body.access_token;
-            const expiresIn = data.body.expires_in || 3600;
-            usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
-            if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
-            spotifyApi.setAccessToken(data.body.access_token);
-            return true;
-        } catch (err) {
-            console.error(`[REFRESH_FAIL] ${sl_uuid}: ${formatError(err)}`);
-            return false;
-        }
-    }
-    return true;
-}
 
+// ================= ROTA DE DADOS =================
 
-// === ROTA 3: BUSCAR MÚSICA ===
 app.get('/current-track', async (req, res) => {
-    const sl_uuid = req.query.uuid;
+  const { user } = req.query;
+  if (!user) return res.json({ success: false, track: 'User not specified', artist: '', progress: 0, duration: 0 });
 
-    if (!sl_uuid || !usersDB[sl_uuid]) {
-        return res.json({ track: 'Not Connected', artist: 'Touch to Log In', error_code: "NOT_LOGGED" });
-    }
-
-    let user = usersDB[sl_uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    if (!await refreshAndSetTokens(sl_uuid, spotifyApi)) {
-        return res.json({ track: `Session Error`, artist: 'Relog HUD', error_code: "REFRESH_ERROR" });
-    }
-
-    try {
-        const playback = await spotifyApi.getMyCurrentPlaybackState();
-
-        if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
-            return res.json({ is_playing: false, track: 'Paused / Idle', artist: '', progress: 0, duration: 0 });
-        }
-
-        const item = playback.body.item;
-        if (!item) return res.json({ is_playing: false, track: 'Commercial / Other', artist: 'Spotify', progress: 0, duration: 0 });
-        
-        let artistName = "Unknown";
-        if (item.artists && item.artists.length > 0) artistName = item.artists.map(a => a.name).join(', ');
-        else if (item.show) artistName = item.show.name;
-
-        res.json({
-            is_playing: playback.body.is_playing,
-            track: item.name,
-            artist: artistName,
-            progress: playback.body.progress_ms,
-            duration: item.duration_ms
+  try {
+    const trackData = await redisClient.get(`track:${user}`);
+    
+    if (trackData) {
+      const currentTrack = JSON.parse(trackData);
+      // CORREÇÃO: Mapear o formato para o esperado pelo LSL
+      res.json({ 
+        track: currentTrack.track,
+        artist: currentTrack.artist,
+        is_playing: currentTrack.is_playing,
+        progress: currentTrack.progress,
+        duration: currentTrack.duration
+      });
+    } else {
+      const freshTrack = await updateUserTrack(user);
+      if (freshTrack) {
+        // CORREÇÃO: Mapear o formato para o esperado pelo LSL
+        res.json({ 
+            track: freshTrack.track,
+            artist: freshTrack.artist,
+            is_playing: freshTrack.is_playing,
+            progress: freshTrack.progress,
+            duration: freshTrack.duration
         });
-    } catch (err) {
-        res.json({ track: `API Error`, artist: `Check Instructions`, error_code: "API_FAIL" });
+      } else {
+        // CORREÇÃO: Mensagem de erro para o LSL
+        res.json({ track: 'Not Connected', artist: 'Touch to Log In', progress: 0, duration: 0 });
+      }
     }
+  } catch (error) {
+    console.error(`❌ Erro em /current-track para ${user}:`, error);
+    res.json({ track: 'Server Error', artist: 'Try again later', progress: 0, duration: 0 });
+  }
 });
 
+// ================= ROTAS DE CONTROLE (NOVO!) =================
 
-// === ROTA 4: CONTROLE DE REPRODUÇÃO (NEXT, PREV, PAUSE/PLAY) ===
 app.post('/control/:action', async (req, res) => {
-    const sl_uuid = req.query.uuid;
+    const userId = req.query.user;
     const action = req.params.action;
 
-    if (!sl_uuid || !usersDB[sl_uuid]) {
-        return res.status(401).json({ error: 'User not logged in.' });
-    }
-
-    let user = usersDB[sl_uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    if (!await refreshAndSetTokens(sl_uuid, spotifyApi)) {
-        return res.status(401).json({ error: 'REFRESH_ERROR: Could not refresh token.' });
-    }
+    if (!userId) return res.status(400).send('User ID required');
 
     try {
-        let spotifyResponse;
-        
+        const userSpotifyApi = await getSpotifyApiForUser(userId);
+        if (!userSpotifyApi) {
+            return res.json({ track: 'Not Connected', artist: 'Please Log In', progress: 0, duration: 0 });
+        }
+
         switch (action) {
             case 'next':
-                spotifyResponse = await spotifyApi.skipToNext();
+                await userSpotifyApi.skipToNext();
                 break;
             case 'previous':
-                spotifyResponse = await spotifyApi.skipToPrevious();
+                await userSpotifyApi.skipToPrevious();
                 break;
             case 'pause':
-                const playback = await spotifyApi.getMyCurrentPlaybackState();
+                const playback = await userSpotifyApi.getMyCurrentPlaybackState();
                 if (playback.body && playback.body.is_playing) {
-                    spotifyResponse = await spotifyApi.pause(); // Pausa
+                    await userSpotifyApi.pause(); // Pausa
                 } else {
-                    spotifyResponse = await spotifyApi.play(); // Toca (Resume)
+                    await userSpotifyApi.play(); // Toca (Resume)
                 }
                 break;
             default:
-                return res.status(400).json({ error: 'Invalid control action.' });
+                return res.status(400).send('Invalid control action.');
         }
-        
-        // Espera e busca o novo estado de reprodução
-        await new Promise(resolve => setTimeout(resolve, 500)); 
-        
-        const newPlayback = await spotifyApi.getMyCurrentPlaybackState();
-        
-        // Retorna o novo estado ao LSL (usando o formato da ROTA 3)
-        if (newPlayback.statusCode === 204 || !newPlayback.body || Object.keys(newPlayback.body).length === 0) {
-             return res.json({ is_playing: false, track: 'Paused / Idle', artist: '', progress: 0, duration: 0 });
-        }
-        
-        const item = newPlayback.body.item;
-        if (!item) return res.json({ is_playing: false, track: 'Commercial / Other', artist: 'Spotify', progress: 0, duration: 0 });
-        
-        let artistName = "Unknown";
-        if (item.artists && item.artists.length > 0) artistName = item.artists.map(a => a.name).join(', ');
-        else if (item.show) artistName = item.show.name;
 
-        res.json({
-            is_playing: newPlayback.body.is_playing,
-            track: item.name,
-            artist: artistName,
-            progress: newPlayback.body.progress_ms,
-            duration: item.duration_ms
-        });
+        // Aguarda a sincronização do Spotify e força a atualização do cache (3 segundos)
+        // Não precisamos de um retorno de JSON do estado aqui, pois o updater fará isso em segundos.
+        // O LSL fará o GET /current-track normalmente.
+        setTimeout(() => updateUserTrack(userId), 500);
         
-    } catch (err) {
-        // CORREÇÃO: Retorna um JSON VÁLIDO no formato de erro para o LSL limpar o estado
-        console.error(`[CONTROL_FAIL] ${sl_uuid} - ${action}: ${formatError(err)}`);
-        res.status(500).json({ 
-            is_playing: false,
-            track: `Control Error`, 
-            artist: `Device Not Found`, 
-            error_code: "CONTROL_FAIL" 
-        });
+        // Retorna sucesso para o LSL
+        res.json({ status: 'ok', message: `${action} command sent.` });
+
+    } catch (error) {
+        console.error(`❌ Erro no controle para ${userId.slice(0,8)} (${action}):`, error.message);
+        // Retorna um erro que o LSL possa interpretar
+        res.status(500).json({ track: 'Control Error', artist: 'Device Not Found', progress: 0, duration: 0 });
     }
 });
 
 
-app.listen(PORT, () => { console.log(`Server V7 Running on port ${PORT}`); });
+// ================= ROTAS DE STATUS/HEALTH =================
+
+app.get('/status', async (req, res) => {
+  try {
+    const userKeys = await redisClient.keys('user:*');
+    const trackKeys = await redisClient.keys('track:*');
+
+    res.json({
+      online: true,
+      userCount: userKeys.length,
+      trackCount: trackKeys.length,
+      memory: process.memoryUsage(),
+      uptime: process.uptime()
+    });
+  } catch (error) {
+    res.json({ online: true, error: error.message });
+  }
+});
+
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'OK', 
+    timestamp: Date.now(),
+    userIntervals: userIntervals.size,
+    version: '2.0-multi-user-controls'
+  });
+});
+
+app.listen(PORT, () => {
+  console.log(`🚀 SPOTIFY MULTI-USER SERVER rodando na porta ${PORT}`);
+  console.log(`🔍 Status: https://mmcspotifysl.onrender.com/status`);
+  console.log(`❤️  Health: https://mmcspotifysl.onrender.com/health`);
+});

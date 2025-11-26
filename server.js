@@ -3,18 +3,17 @@ const SpotifyWebApi = require('spotify-web-api-node');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === CONFIGURATION ===
-const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'bb4c46d3e3e549bb9ebf5007e89a5c9e';
-const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb711d39255499';
-const REDIRECT_URI = process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback';
+// ==== CONFIG ====
+const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || "bb4c46d3e3e549bb9ebf5007e89a5c9e";
+const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || "f1090563300d4a598dbb711d39255499";
+const REDIRECT_URI = process.env.REDIRECT_URI || "https://mmcspotifysl.onrender.com/callback";
 
-// === IN-MEMORY DATABASE ===
-const usersDB = {};
+const usersDB = {}; // memory DB
 
-app.use(express.static('public'));
 app.use(express.json());
+app.use(express.static("public"));
 
-function getSpotifyApi() {
+function getApi() {
     return new SpotifyWebApi({
         clientId: CLIENT_ID,
         clientSecret: CLIENT_SECRET,
@@ -22,71 +21,57 @@ function getSpotifyApi() {
     });
 }
 
-function formatError(err) {
-    try {
-        if (!err) return "Unknown Error";
-        if (err.body) {
-            if (err.body.error_description) return "Spotify: " + err.body.error_description;
-            if (err.body.error && err.body.error.message) return "Spotify: " + err.body.error.message;
-        }
-        if (err.message) return err.message;
-        return JSON.stringify(err);
-    } catch (e) {
-        return "Internal Error";
-    }
-}
+// ==== LOGIN ====
+app.get("/login", (req, res) => {
+    const uuid = req.query.uuid;
 
-// === LOGIN ===
-app.get('/login', (req, res) => {
-    const sl_uuid = req.query.uuid;
-    if (!sl_uuid) return res.send("ERROR: Missing UUID. Use the HUD.");
+    if (!uuid) return res.send("Missing UUID");
 
-    const spotifyApi = getSpotifyApi();
+    const api = getApi();
     const scopes = [
-        'user-read-currently-playing',
-        'user-read-playback-state'
+        "user-read-currently-playing",
+        "user-read-playback-state"
     ];
 
-    const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
-    res.redirect(authUrl);
+    const url = api.createAuthorizeURL(scopes, uuid, true);
+    res.redirect(url);
 });
 
-// === CALLBACK ===
-app.get('/callback', async (req, res) => {
-    const { code, state, error } = req.query;
-    const sl_uuid = state;
+// ==== CALLBACK ====
+app.get("/callback", async (req, res) => {
+    const code = req.query.code;
+    const uuid = req.query.state;
 
-    if (error) return res.send(`Error: ${error}`);
-    if (!code || !sl_uuid) return res.send("Critical Error: Missing data.");
+    if (!code || !uuid) return res.send("Error: Missing data");
 
     try {
-        const spotifyApi = getSpotifyApi();
-        const data = await spotifyApi.authorizationCodeGrant(code);
+        const api = getApi();
+        const data = await api.authorizationCodeGrant(code);
 
-        usersDB[sl_uuid] = {
-            accessToken: data.body.access_token,
-            refreshToken: data.body.refresh_token,
-            expiresAt: Date.now() + data.body.expires_in * 1000
+        usersDB[uuid] = {
+            token: data.body.access_token,
+            refresh: data.body.refresh_token,
+            expires: Date.now() + (data.body.expires_in * 1000)
         };
 
         res.send(`
-            <body style="background:#121212; color:white; text-align:center; padding-top:50px;font-family:sans-serif;">
-                <h1 style="color:#1DB954;">Connected!</h1>
-                <p>UUID linked:<br><b>${sl_uuid}</b></p>
-                <p style="color:#aaa;font-size:12px;">You may close this window.</p>
+            <body style="background:#121212;color:white;text-align:center;padding-top:40px;font-family:sans-serif">
+            <h1 style="color:#1DB954">Connected!</h1>
+            <p><b>${uuid}</b> linked successfully.</p>
+            <p>You may close this window.</p>
             </body>
         `);
 
-    } catch (err) {
-        res.send("Login Failed: " + formatError(err));
+    } catch (e) {
+        res.send("Login error: " + e.message);
     }
 });
 
-// === CURRENT TRACK — VERSÃO 100% FUNCIONAL ===
-app.get('/current-track', async (req, res) => {
-    const sl_uuid = req.query.uuid;
+// ==== CURRENT TRACK (VERSÃO FINAL E 100% FUNCIONAL) ====
+app.get("/current-track", async (req, res) => {
+    const uuid = req.query.uuid;
 
-    if (!sl_uuid || !usersDB[sl_uuid]) {
+    if (!uuid || !usersDB[uuid]) {
         return res.json({
             track: "Not connected",
             artist: "Click to log in",
@@ -94,32 +79,30 @@ app.get('/current-track', async (req, res) => {
         });
     }
 
-    let user = usersDB[sl_uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
+    const api = getApi();
+    api.setAccessToken(usersDB[uuid].token);
+    api.setRefreshToken(usersDB[uuid].refresh);
 
-    // Refresh token before expiration
-    if (Date.now() >= user.expiresAt - 60000) {
+    // Refresh token
+    if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
-            const data = await spotifyApi.refreshAccessToken();
-            usersDB[sl_uuid].accessToken = data.body.access_token;
-            usersDB[sl_uuid].expiresAt = Date.now() + (data.body.expires_in || 3600) * 1000;
-            spotifyApi.setAccessToken(data.body.access_token);
-        } catch (err) {
+            const data = await api.refreshAccessToken();
+            usersDB[uuid].token = data.body.access_token;
+            usersDB[uuid].expires = Date.now() + (data.body.expires_in * 1000);
+            api.setAccessToken(data.body.access_token);
+        } catch (e) {
             return res.json({
                 track: "Session Error",
-                artist: "Relog the HUD",
-                error_code: "REFRESH_ERROR"
+                artist: "Relog HUD",
+                error_code: "REFRESH"
             });
         }
     }
 
     try {
-        const playback = await spotifyApi.getMyCurrentPlaybackState();
+        const playback = await api.getMyCurrentPlaybackState();
 
-        // Se nada retornou
-        if (!playback || !playback.body) {
+        if (!playback.body) {
             return res.json({
                 is_playing: false,
                 track: "Nothing playing",
@@ -130,12 +113,8 @@ app.get('/current-track', async (req, res) => {
         }
 
         const body = playback.body;
-        const item = body.item;
 
-        // DEBUG — útil se algo der errado
-        // console.log("PLAYBACK:", JSON.stringify(playback.body, null, 2));
-
-        // === NÃO ESTÁ TOCANDO ===
+        // === Pausado ===
         if (!body.is_playing) {
             return res.json({
                 is_playing: false,
@@ -146,19 +125,18 @@ app.get('/current-track', async (req, res) => {
             });
         }
 
-        // === TOCANDO ALGO ===
-        if (item) {
-            let artistName = "Unknown";
+        // === Tocando ===
+        if (body.item) {
+            const item = body.item;
 
-            if (item.artists && item.artists.length > 0)
-                artistName = item.artists.map(a => a.name).join(', ');
-            else if (item.show)
-                artistName = item.show.name;
+            let artist = "Unknown";
+            if (item.artists) artist = item.artists.map(a => a.name).join(", ");
+            if (item.show) artist = item.show.name;
 
             return res.json({
                 is_playing: true,
                 track: item.name,
-                artist: artistName,
+                artist: artist,
                 progress: body.progress_ms,
                 duration: item.duration_ms
             });
@@ -173,15 +151,13 @@ app.get('/current-track', async (req, res) => {
             duration: 0
         });
 
-    } catch (err) {
+    } catch (e) {
         return res.json({
             track: "Error",
-            artist: formatError(err),
-            error_code: "API_FAIL"
+            artist: e.message,
+            error_code: "API"
         });
     }
 });
 
-app.listen(PORT, () => {
-    console.log("Server running on port " + PORT);
-});
+app.listen(PORT, () => console.log("Server running on " + PORT));

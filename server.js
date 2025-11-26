@@ -3,7 +3,7 @@ const SpotifyWebApi = require('spotify-web-api-node');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Credenciais (Tenta usar as do ambiente, ou usa as fixas como fallback)
+// Configurações
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'bb4c46d3e3e549bb9ebf5007e89a5c9e';
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb711d39255499';
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback';
@@ -21,13 +21,40 @@ function getSpotifyApi() {
     });
 }
 
+// === FUNÇÃO PARA DECIFRAR O ERRO ===
+function getErrorMessage(err) {
+    // Caso 1: Erro padrão do Spotify API (objeto dentro do body)
+    if (err.body && err.body.error) {
+        // Se error for um objeto { status: 401, message: "..." }
+        if (typeof err.body.error === 'object' && err.body.error.message) {
+            return err.body.error.message;
+        }
+        // Se error for apenas uma string (comum em auth: "invalid_grant")
+        if (typeof err.body.error === 'string') {
+            return err.body.error_description || err.body.error;
+        }
+    }
+    
+    // Caso 2: Erro genérico de Javascript ou Rede
+    if (err.message) return err.message;
+    
+    // Caso 3: O erro é apenas uma string
+    if (typeof err === 'string') return err;
+    
+    // Caso 4: Desconhecido (Transforma o objeto em texto para lermos)
+    try {
+        return JSON.stringify(err);
+    } catch (e) {
+        return "Erro Desconhecido";
+    }
+}
+
 // ROTA DE LOGIN
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     if (!sl_uuid) return res.send("ERRO: Faltou o UUID. Use o HUD.");
     
     const spotifyApi = getSpotifyApi();
-    // Escopos atualizados
     const scopes = [
         'user-read-currently-playing', 
         'user-read-playback-state', 
@@ -59,7 +86,7 @@ app.get('/callback', async (req, res) => {
         res.send(`<h1 style="color:green; text-align:center; font-family:sans-serif;">CONECTADO COM SUCESSO!</h1><p style="text-align:center;">Pode fechar e clicar no HUD.</p>`);
     } catch (err) {
         console.error("Erro no Callback:", err);
-        res.send(`Erro no Login: ${err.message}`);
+        res.send(`Erro no Login: ${getErrorMessage(err)}`);
     }
 });
 
@@ -67,7 +94,6 @@ app.get('/callback', async (req, res) => {
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
 
-    // Checagem 1: Usuário existe?
     if (!sl_uuid || !usersDB[sl_uuid]) {
         return res.json({ 
             track: 'Não conectado', 
@@ -81,13 +107,12 @@ app.get('/current-track', async (req, res) => {
     spotifyApi.setAccessToken(user.accessToken);
     spotifyApi.setRefreshToken(user.refreshToken);
 
-    // Checagem 2: Token precisa renovar?
+    // Renovação de Token
     if (Date.now() >= user.expiresAt - 60000) {
         try {
             console.log(`[REFRESH] Renovando token de ${sl_uuid}...`);
             const data = await spotifyApi.refreshAccessToken();
             usersDB[sl_uuid].accessToken = data.body.access_token;
-            // Se não vier expires_in, assume 1 hora
             const expiresIn = data.body.expires_in || 3600;
             usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
             
@@ -97,19 +122,18 @@ app.get('/current-track', async (req, res) => {
             spotifyApi.setAccessToken(data.body.access_token);
         } catch (err) {
             console.error("Erro Refresh:", err);
+            // Aqui usamos a nova função para ver o erro real
             return res.json({ 
-                track: `Erro Refresh: ${err.statusCode}`, 
-                artist: 'Relogue o HUD', 
+                track: `Erro Login`, 
+                artist: getErrorMessage(err).substring(0, 254), // Limita tamanho p/ SL
                 error_code: "REFRESH_ERROR" 
             });
         }
     }
 
-    // Checagem 3: Buscar música
     try {
         const playback = await spotifyApi.getMyCurrentPlaybackState();
 
-        // Tratamento para status 204 (Nada tocando) ou corpo vazio
         if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
             return res.json({
                 is_playing: false,
@@ -121,13 +145,11 @@ app.get('/current-track', async (req, res) => {
         }
 
         const item = playback.body.item;
-        
-        // Se item for nulo (ex: propaganda ou podcast local bugado)
         if (!item) {
              return res.json({
                 is_playing: false,
-                track: 'Comercial/Outro',
-                artist: '',
+                track: 'Podcast/Outro', // Mudado para ser mais amigável
+                artist: 'Mídia não suportada',
                 progress: 0, duration: 0
             });
         }
@@ -149,17 +171,17 @@ app.get('/current-track', async (req, res) => {
 
     } catch (err) {
         console.error("ERRO API:", err);
-        // AQUI ESTÁ A MÁGICA: Enviamos o erro real para o HUD
-        const errorMsg = err.body && err.body.error ? err.body.error.message : err.message;
+        // Usamos a função inteligente aqui também
+        const msg = getErrorMessage(err);
         
         res.json({ 
-            track: `Erro: ${errorMsg}`, 
-            artist: `Cod: ${err.statusCode}`,
+            track: `Erro: ${msg.substring(0, 100)}`, // Corta para caber no HUD
+            artist: `Verifique o servidor`,
             error_code: "API_FAIL"
         });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor Diagnóstico rodando na porta ${PORT}`);
+    console.log(`Servidor V3 Final rodando na porta ${PORT}`);
 });

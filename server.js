@@ -1,4 +1,4 @@
-// server.js (VERSÃO MULTI-USUÁRIO FINAL - SEM LOGS EXTRAS)
+// server.js (VERSÃO MULTI-USUÁRIO FINAL)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 

@@ -3,12 +3,12 @@ const SpotifyWebApi = require('spotify-web-api-node');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// === CONFIGURAÇÕES ===
+// === CONFIGURATIONS ===
 const CLIENT_ID = process.env.SPOTIFY_CLIENT_ID || 'bb4c46d3e3e549bb9ebf5007e89a5c9e';
 const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb711d39255499';
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback';
 
-// === BANCO DE DADOS NA MEMÓRIA ===
+// === IN-MEMORY DATABASE ===
 const usersDB = {}; 
 
 app.use(express.static('public'));
@@ -24,7 +24,7 @@ function getSpotifyApi() {
 
 function formatError(err) {
     try {
-        if (!err) return "Erro Desconhecido";
+        if (!err) return "Unknown Error";
         if (err.body) {
             if (err.body.error_description) return "Spotify: " + err.body.error_description;
             if (err.body.error && err.body.error.message) return "Spotify: " + err.body.error.message;
@@ -33,12 +33,11 @@ function formatError(err) {
         if (err.message) return err.message;
         return JSON.stringify(err).replace(/[{}"]/g, ' '); 
     } catch (e) {
-        return "Erro Interno";
+        return "Internal Error";
     }
 }
 
-// === FUNÇÃO AUXILIAR: AUTENTICAR E ATUALIZAR TOKEN ===
-// Isso evita repetir código em todas as rotas (Play, Pause, Next, etc)
+// === HELPER FUNCTION: AUTHENTICATE AND REFRESH TOKEN ===
 async function getAuthenticatedApi(sl_uuid) {
     if (!sl_uuid || !usersDB[sl_uuid]) return null;
 
@@ -47,7 +46,7 @@ async function getAuthenticatedApi(sl_uuid) {
     spotifyApi.setAccessToken(user.accessToken);
     spotifyApi.setRefreshToken(user.refreshToken);
 
-    // Verifica se precisa renovar o token (Refresh Token)
+    // Check if the token needs to be refreshed (Refresh Token)
     if (Date.now() >= user.expiresAt - 60000) {
         try {
             const data = await spotifyApi.refreshAccessToken();
@@ -57,25 +56,25 @@ async function getAuthenticatedApi(sl_uuid) {
             
             if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
             spotifyApi.setAccessToken(data.body.access_token);
-            console.log(`[REFRESH] Token renovado para ${sl_uuid}`);
+            console.log(`[REFRESH] Token refreshed for ${sl_uuid}`);
         } catch (err) {
-            console.error(`[REFRESH ERROR] Falha ao renovar para ${sl_uuid}`);
+            console.error(`[REFRESH ERROR] Failed to refresh for ${sl_uuid}`);
             return null;
         }
     }
     return spotifyApi;
 }
 
-// === ROTA 1: LOGIN (AGORA COM PERMISSÃO DE CONTROLE) ===
+// === ROUTE 1: LOGIN (NOW WITH CONTROL SCOPE) ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
     if (!sl_uuid) {
-        return res.send("ERRO: Faltou o UUID. Use o HUD.");
+        return res.send("ERROR: Missing UUID. Please use the HUD.");
     }
     
     const spotifyApi = getSpotifyApi();
-    // ADICIONADO 'user-modify-playback-state' PARA PERMITIR PLAY/PAUSE/NEXT
+    // Includes 'user-modify-playback-state' for Play/Pause/Next
     const scopes = [
         'user-read-currently-playing', 
         'user-read-playback-state', 
@@ -87,13 +86,13 @@ app.get('/login', (req, res) => {
     res.redirect(authUrl);
 });
 
-// === ROTA 2: CALLBACK ===
+// === ROUTE 2: CALLBACK (SUCCESS SCREEN) ===
 app.get('/callback', async (req, res) => {
     const { code, state, error } = req.query;
     const sl_uuid = state; 
 
-    if (error) return res.send(`Erro: ${error}`);
-    if (!code || !sl_uuid) return res.send(`Erro Crítico: Dados faltando.`);
+    if (error) return res.send(`Error: ${error}`);
+    if (!code || !sl_uuid) return res.send(`Critical Error: Missing data.`);
 
     try {
         const spotifyApi = getSpotifyApi();
@@ -105,40 +104,41 @@ app.get('/callback', async (req, res) => {
             expiresAt: Date.now() + (data.body.expires_in * 1000)
         };
         
-        console.log(`[LOGIN] Sucesso para: ${sl_uuid}`);
+        console.log(`[LOGIN] Success for: ${sl_uuid}`);
         
+        // --- TRANSLATED SUCCESS SCREEN ---
         res.send(`
-            <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
-                <h1 style="color:#1DB954;">Conectado!</h1>
-                <p>Conta vinculada ao UUID:<br><b>${sl_uuid}</b></p>
-                <p style="color:#ccc; font-size:12px;">Pode fechar esta janela e testar os botões.</p>
+            <body style="background:#191414; color:#FFFFFF; font-family:sans-serif; text-align:center; padding-top:100px;">
+                <h1 style="color:#1DB954; font-size:48px;">Awesome!</h1>
+                <p>Your Spotify Player is ready for use!</p>
+                <p style="color:#BBBBBB;">You can close this tab now. Thank you!</p>
             </body>
         `);
     } catch (err) {
-        res.send(`Falha no Login: ${formatError(err)}`);
+        res.send(`Login Failed: ${formatError(err)}`);
     }
 });
 
-// === ROTA 3: BUSCAR MÚSICA ===
+// === ROUTE 3: FETCH TRACK DATA ===
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
 
     if (!spotifyApi) {
-        return res.json({ track: 'Não conectado', artist: 'Toque para Logar', error_code: "NOT_LOGGED" });
+        return res.json({ track: 'Not Connected', artist: 'Tap to Log In', error_code: "NOT_LOGGED" });
     }
 
     try {
         const playback = await spotifyApi.getMyCurrentPlaybackState();
 
         if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
-            return res.json({ is_playing: false, track: 'Nada tocando', artist: '', progress: 0, duration: 0 });
+            return res.json({ is_playing: false, track: 'No music playing', artist: '', progress: 0, duration: 0 });
         }
 
         const item = playback.body.item;
-        if (!item) return res.json({ is_playing: false, track: 'Comercial / Outro', artist: 'Spotify', progress: 0, duration: 0 });
+        if (!item) return res.json({ is_playing: false, track: 'Commercial / Other', artist: 'Spotify', progress: 0, duration: 0 });
 
-        let artistName = "Desconhecido";
+        let artistName = "Unknown";
         if (item.artists && item.artists.length > 0) artistName = item.artists.map(a => a.name).join(', ');
         else if (item.show) artistName = item.show.name;
 
@@ -151,17 +151,16 @@ app.get('/current-track', async (req, res) => {
         });
 
     } catch (err) {
-        res.json({ track: `Erro: ${formatError(err).substring(0, 40)}...`, artist: `Verifique Instruções`, error_code: "API_FAIL" });
+        res.json({ track: `Error: ${formatError(err).substring(0, 40)}...`, artist: `Check Instructions`, error_code: "API_FAIL" });
     }
 });
 
-// === NOVAS ROTAS DE CONTROLE (BOTÕES) ===
+// === NEW CONTROL ROUTES (BUTTONS) ===
 
-// Rota: Próxima Música
 app.post('/next', async (req, res) => {
     const sl_uuid = req.query.uuid;
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
-    if (!spotifyApi) return res.status(401).send("Não logado");
+    if (!spotifyApi) return res.status(401).send("Not Logged In");
 
     try {
         await spotifyApi.skipToNext();
@@ -172,11 +171,10 @@ app.post('/next', async (req, res) => {
     }
 });
 
-// Rota: Música Anterior
 app.post('/previous', async (req, res) => {
     const sl_uuid = req.query.uuid;
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
-    if (!spotifyApi) return res.status(401).send("Não logado");
+    if (!spotifyApi) return res.status(401).send("Not Logged In");
 
     try {
         await spotifyApi.skipToPrevious();
@@ -187,26 +185,24 @@ app.post('/previous', async (req, res) => {
     }
 });
 
-// Rota: Pausar
 app.post('/pause', async (req, res) => {
     const sl_uuid = req.query.uuid;
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
-    if (!spotifyApi) return res.status(401).send("Não logado");
+    if (!spotifyApi) return res.status(401).send("Not Logged In");
 
     try {
         await spotifyApi.pause();
         res.send("OK");
     } catch (err) {
-        console.error(err); // Se já estiver pausado, o Spotify pode dar erro, mas ignoramos
+        console.error(err); 
         res.status(500).send(formatError(err));
     }
 });
 
-// Rota: Dar Play
 app.post('/play', async (req, res) => {
     const sl_uuid = req.query.uuid;
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
-    if (!spotifyApi) return res.status(401).send("Não logado");
+    if (!spotifyApi) return res.status(401).send("Not Logged In");
 
     try {
         await spotifyApi.play();
@@ -217,4 +213,4 @@ app.post('/play', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => { console.log(`Servidor V8 Rodando na porta ${PORT}`); });
+app.listen(PORT, () => { console.log(`Server V8 Running on port ${PORT}`); });

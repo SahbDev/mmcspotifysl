@@ -116,7 +116,7 @@ app.get('/current-track', async (req, res) => {
     try {
         const playback = await spotifyApi.getMyCurrentPlaybackState();
         if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
-            return res.json({ is_playing: false, track: 'Nada tocando', artist: '', progress: 0, duration: 0 });
+            return res.json({ is_playing: false, track: 'Nothing Playing', artist: '', progress: 0, duration: 0 });
         }
 
         const item = playback.body.item;

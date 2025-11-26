@@ -38,7 +38,7 @@ function formatError(err) {
     }
 }
 
-// === ROTA 1: LOGIN (AGORA COM TRAVA) ===
+// === ROTA 1: LOGIN ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
@@ -50,7 +50,6 @@ app.get('/login', (req, res) => {
     // Adicionadas permissões de controle (user-modify-playback-state)
     const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position', 'user-modify-playback-state'];
     
-    // O 'true' no final FORÇA o Spotify a mostrar a tela de login/confirmação
     const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
     
     res.redirect(authUrl);
@@ -85,21 +84,9 @@ app.get('/callback', async (req, res) => {
     }
 });
 
-// === ROTA 3: BUSCAR MÚSICA ===
-app.get('/current-track', async (req, res) => {
-    const sl_uuid = req.query.uuid;
-
-    if (!sl_uuid || !usersDB[sl_uuid]) {
-        // TRADUÇÃO
-        return res.json({ track: 'Not Connected', artist: 'Touch to Log In', error_code: "NOT_LOGGED" });
-    }
-
+// Função Auxiliar para Refresh de Token
+async function refreshAndSetTokens(sl_uuid, spotifyApi) {
     let user = usersDB[sl_uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    // Refresh Token
     if (Date.now() >= user.expiresAt - 60000) {
         try {
             const data = await spotifyApi.refreshAccessToken();
@@ -108,22 +95,41 @@ app.get('/current-track', async (req, res) => {
             usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
             if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
             spotifyApi.setAccessToken(data.body.access_token);
+            return true;
         } catch (err) {
-            // TRADUÇÃO
-            return res.json({ track: `Session Error`, artist: 'Relog HUD', error_code: "REFRESH_ERROR" });
+            console.error(`[REFRESH_FAIL] ${sl_uuid}: ${formatError(err)}`);
+            return false;
         }
+    }
+    return true;
+}
+
+
+// === ROTA 3: BUSCAR MÚSICA ===
+app.get('/current-track', async (req, res) => {
+    const sl_uuid = req.query.uuid;
+
+    if (!sl_uuid || !usersDB[sl_uuid]) {
+        return res.json({ track: 'Not Connected', artist: 'Touch to Log In', error_code: "NOT_LOGGED" });
+    }
+
+    let user = usersDB[sl_uuid];
+    const spotifyApi = getSpotifyApi();
+    spotifyApi.setAccessToken(user.accessToken);
+    spotifyApi.setRefreshToken(user.refreshToken);
+
+    if (!await refreshAndSetTokens(sl_uuid, spotifyApi)) {
+        return res.json({ track: `Session Error`, artist: 'Relog HUD', error_code: "REFRESH_ERROR" });
     }
 
     try {
         const playback = await spotifyApi.getMyCurrentPlaybackState();
 
-        // CORREÇÃO: Usar "Paused / Idle" para o LSL identificar o estado correto (204 = No Content)
         if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
             return res.json({ is_playing: false, track: 'Paused / Idle', artist: '', progress: 0, duration: 0 });
         }
 
         const item = playback.body.item;
-        // TRADUÇÃO
         if (!item) return res.json({ is_playing: false, track: 'Commercial / Other', artist: 'Spotify', progress: 0, duration: 0 });
         
         let artistName = "Unknown";
@@ -138,7 +144,6 @@ app.get('/current-track', async (req, res) => {
             duration: item.duration_ms
         });
     } catch (err) {
-        // TRADUÇÃO
         res.json({ track: `Error: ${formatError(err).substring(0, 40)}...`, artist: `Check Instructions`, error_code: "API_FAIL" });
     }
 });
@@ -158,18 +163,8 @@ app.post('/control/:action', async (req, res) => {
     spotifyApi.setAccessToken(user.accessToken);
     spotifyApi.setRefreshToken(user.refreshToken);
 
-    // Refresh Token check
-    if (Date.now() >= user.expiresAt - 60000) {
-        try {
-            const data = await spotifyApi.refreshAccessToken();
-            usersDB[sl_uuid].accessToken = data.body.access_token;
-            const expiresIn = data.body.expires_in || 3600;
-            usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
-            if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
-            spotifyApi.setAccessToken(data.body.access_token);
-        } catch (err) {
-            return res.status(401).json({ error: 'REFRESH_ERROR: Could not refresh token.' });
-        }
+    if (!await refreshAndSetTokens(sl_uuid, spotifyApi)) {
+        return res.status(401).json({ error: 'REFRESH_ERROR: Could not refresh token.' });
     }
 
     try {
@@ -195,13 +190,36 @@ app.post('/control/:action', async (req, res) => {
                 return res.status(400).json({ error: 'Invalid control action.' });
         }
         
-        // Spotify retorna 204 para skip/pause bem-sucedidos
-        res.status(200).json({ status: 'ok', action: action, message: `${action} command sent.` });
+        // CORREÇÃO CRÍTICA DE SINCRONIA:
+        // Após o comando, espera um momento e busca o novo estado de reprodução
+        // Isso garante que o LSL obtenha o estado atualizado imediatamente.
+        await new Promise(resolve => setTimeout(resolve, 500)); 
+        
+        const newPlayback = await spotifyApi.getMyCurrentPlaybackState();
+        
+        // Retorna o novo estado ao LSL (usando o formato da ROTA 3)
+        if (newPlayback.statusCode === 204 || !newPlayback.body || Object.keys(newPlayback.body).length === 0) {
+             return res.json({ is_playing: false, track: 'Paused / Idle', artist: '', progress: 0, duration: 0 });
+        }
+        
+        const item = newPlayback.body.item;
+        if (!item) return res.json({ is_playing: false, track: 'Commercial / Other', artist: 'Spotify', progress: 0, duration: 0 });
+        
+        let artistName = "Unknown";
+        if (item.artists && item.artists.length > 0) artistName = item.artists.map(a => a.name).join(', ');
+        else if (item.show) artistName = item.show.name;
+
+        res.json({
+            is_playing: newPlayback.body.is_playing,
+            track: item.name,
+            artist: artistName,
+            progress: newPlayback.body.progress_ms,
+            duration: item.duration_ms
+        });
         
     } catch (err) {
         console.error(`[CONTROL_FAIL] ${sl_uuid} - ${action}: ${formatError(err)}`);
-        // Pode ser erro 403 (Permissão negada, dispositivo inativo, etc.)
-        res.status(500).json({ error: `Control API Failed: ${formatError(err)}` });
+        res.status(500).json({ track: `Control Error: ${formatError(err).substring(0, 40)}...`, artist: `Relog HUD`, error_code: "CONTROL_FAIL" });
     }
 });
 

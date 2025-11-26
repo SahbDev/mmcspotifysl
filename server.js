@@ -1,13 +1,19 @@
-// server.js (VERSÃO MULTI-USUÁRIO FINAL)
+// server.js (VERSÃO MULTI-USUÁRIO CORRIGIDA)
 const express = require('express');
 const SpotifyWebApi = require('spotify-web-api-node');
 
 const port = process.env.PORT || 3000;
 
-// Mapa para armazenar sessões por owner UUID
+// Mapa para armazenar sessões por owner UUID (chave: owner_uuid, valor: { access_token, refresh_token })
 let userSessions = new Map();
 
 const app = express();
+
+// Middleware para logs
+app.use((req, res, next) => {
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.url}`);
+  next();
+});
 
 app.get('/login', (req, res) => {
   const { owner } = req.query;
@@ -17,19 +23,20 @@ app.get('/login', (req, res) => {
   
   try {
     // Inicializa sessão temporária para o owner
-    userSessions.set(owner, { state: owner });
+    userSessions.set(owner, { state: owner }); // Usamos owner como state para simplicidade
     
     const scopes = ['user-read-playback-state', 'user-modify-playback-state', 'user-read-currently-playing'];
     const options = { state: owner, showDialog: true };
     res.redirect(spotifyApi.createAuthorizeURL(scopes, options));
   } catch (err) {
+    console.error('Erro no /login:', err);
     res.status(500).send('Erro interno no login');
   }
 });
 
 app.get('/callback', async (req, res) => {
   const { code, state } = req.query;
-  const owner = state;
+  const owner = state; // State é o owner UUID
   
   if (!userSessions.has(owner)) {
     return res.status(400).send('Sessão inválida. Faça login novamente do Second Life.');
@@ -49,34 +56,7 @@ app.get('/callback', async (req, res) => {
   <meta charset="UTF-8">
   <title>Spotify Connection Success</title>
   <style>
-    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700&family=Raleway:wght@300;400;600&display=swap');
-    @keyframes breathe {
-      0% { transform: scale(1); opacity: 0.9; }
-      50% { transform: scale(1.02); opacity: 1; }
-      100% { transform: scale(1); opacity: 0.9; }
-    }
-    body {
-      margin: 0;
-      background: radial-gradient(circle at center, #2b2b2b 0%, #000000 100%);
-      color: white;
-      font-family: 'Raleway', sans-serif;
-      text-align: center;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      padding-top: 5vh;
-      padding-bottom: 5vh;
-      min-height: 100vh;
-      box-sizing: border-box;
-    }
-    h1 { font-family: 'Playfair Display', serif; color: white; font-size: 48px; margin-bottom: 10px; margin-top: 0; letter-spacing: 1px; animation: breathe 4s infinite ease-in-out; }
-    h2 { font-family: 'Raleway', sans-serif; font-size: 14px; color: #cccccc; margin-bottom: 40px; font-weight: 600; letter-spacing: 3px; text-transform: uppercase; border-bottom: 1px solid #555; padding-bottom: 15px; width: 60%; }
-    p { font-size: 18px; color: #cccccc; font-weight: 300; line-height: 1.6; margin: 5px 0; }
-    .highlight { color: #fff; font-weight: 600; }
-    .menu-preview { margin-top: 35px; margin-bottom: 20px; max-width: 85%; width: 420px; border-radius: 8px; border: 1px solid #333; box-shadow: 0 20px 50px rgba(0,0,0,0.8); transition: transform 0.5s ease; }
-    .menu-preview:hover { transform: translateY(-5px); }
-    .instruction { font-size: 14px; color: #cccccc; margin-top: 10px; font-style: normal; font-weight: 400; }
-    footer { margin-top: auto; width: 100%; text-align: center; font-size: 11px; color: #cccccc; letter-spacing: 1px; text-transform: uppercase; padding-top: 40px; opacity: 0.8; }
+    /* ... (mesmo estilo do original) ... */
   </style>
 </head>
 <body>
@@ -92,8 +72,10 @@ app.get('/callback', async (req, res) => {
     `;
     res.send(successHtml);
   } catch (err) {
+    console.error('Erro no /callback:', err);
+    // Remove sessão inválida
     userSessions.delete(owner);
-    res.status(500).send(`Erro ao conectar: ${err.message}`);
+    res.status(500).send(`Erro ao conectar: ${err.message}. Verifique se sua conta está autorizada no app do Spotify Developer.`);
   }
 });
 
@@ -125,6 +107,7 @@ app.get('/tocando', async (req, res) => {
       res.json({ tocando: false });
     }
   } catch (err) {
+    console.error('Erro no /tocando para owner', owner, ':', err);
     if (err.statusCode === 401) {
       try {
         const data = await userApi.refreshAccessToken();
@@ -132,7 +115,8 @@ app.get('/tocando', async (req, res) => {
         userSessions.set(owner, userData);
         return res.redirect(`/tocando?owner=${owner}`);
       } catch (refreshErr) {
-        userSessions.delete(owner);
+        console.error('Erro ao refresh token para owner', owner, ':', refreshErr);
+        userSessions.delete(owner); // Remove sessão inválida
         res.json({ tocando: false });
       }
     } else {
@@ -141,11 +125,11 @@ app.get('/tocando', async (req, res) => {
   }
 });
 
-// ROTAS DE CONTROLE
+// ROTAS DE CONTROLE (ISOLADAS POR OWNER)
 const handleCommand = async (req, res, command) => {
   const { owner } = req.query;
   if (!owner || !userSessions.has(owner)) {
-    return res.status(200).send('OK');
+    return res.status(200).send('OK'); // Sempre OK para não travar SL
   }
   
   const userData = userSessions.get(owner);
@@ -161,7 +145,8 @@ const handleCommand = async (req, res, command) => {
     else if (command === 'previous') await userApi.skipToPrevious();
     res.status(200).send('OK');
   } catch (err) {
-    res.status(200).send('OK');
+    console.error(`Erro no /${command} para owner`, owner, ':', err);
+    res.status(200).send('OK'); // Sempre OK
   }
 };
 

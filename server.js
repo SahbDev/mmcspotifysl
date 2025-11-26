@@ -20,39 +20,36 @@ function getSpotifyApi() {
     });
 }
 
-// === FUNÇÃO BLINDADA PARA LER ERROS ===
-function getErrorMessage(err) {
+// === NOVA FUNÇÃO DE FORMATAÇÃO DE ERRO ===
+function formatError(err) {
     try {
-        // Se já for texto, retorna
-        if (typeof err === 'string') return err;
-        
-        // Se não existir erro, retorna genérico
-        if (!err) return "Erro Nulo Detectado";
+        // Se err não existe
+        if (!err) return "Erro Desconhecido (Null)";
 
-        // Tenta achar erro dentro do 'body' (Padrão Spotify)
+        // 1. Tenta pegar a descrição do BODY (onde o Spotify detalha o erro)
         if (err.body) {
-            // Caso: { error: "invalid_grant", error_description: "User not registered..." }
-            if (err.body.error_description) return String(err.body.error_description);
-            
-            // Caso: { error: { status: 401, message: "Token expired" } }
-            if (err.body.error && err.body.error.message) return String(err.body.error.message);
-            
-            // Caso: { error: "Alguma string solta" }
-            if (typeof err.body.error === 'string') return String(err.body.error);
+            if (err.body.error_description) return "Spotify: " + err.body.error_description;
+            if (err.body.error && err.body.error.message) return "Spotify: " + err.body.error.message;
+            if (typeof err.body.error === 'string') return "Spotify: " + err.body.error;
         }
 
-        // Tenta mensagem padrão de JavaScript
-        if (err.message) return String(err.message);
+        // 2. Se a mensagem for um Objeto (Causa do [object Object]), converte pra JSON
+        if (typeof err.message === 'object') {
+            return "Detalhe: " + JSON.stringify(err.message).replace(/[{}"]/g, ''); 
+        }
 
-        // Se tudo falhar, transforma o objeto bruto em texto (JSON)
-        return JSON.stringify(err);
-        
+        // 3. Se tiver mensagem de texto normal
+        if (err.message && err.message !== "[object Object]") return err.message;
+
+        // 4. Último recurso: JSON do erro completo
+        return JSON.stringify(err).substring(0, 100); 
+
     } catch (e) {
-        return "Erro Crítico na Leitura do Erro";
+        return "Erro Crítico de Leitura";
     }
 }
 
-// Login
+// ROTA DE LOGIN
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     if (!sl_uuid) return res.send("ERRO: Faltou o UUID. Use o HUD.");
@@ -63,7 +60,7 @@ app.get('/login', (req, res) => {
     res.redirect(authUrl);
 });
 
-// Callback
+// ROTA DE CALLBACK
 app.get('/callback', async (req, res) => {
     const { code, state, error } = req.query;
     const sl_uuid = state;
@@ -81,13 +78,15 @@ app.get('/callback', async (req, res) => {
             expiresAt: Date.now() + (data.body.expires_in * 1000)
         };
         
+        console.log(`[LOGIN] Sucesso para ${sl_uuid}`);
         res.send(`<h1 style="color:green; font-family:sans-serif; text-align:center;">CONECTADO!</h1><p style="text-align:center;">Volte ao SL e clique no HUD.</p>`);
     } catch (err) {
-        res.send(`Erro no Login: ${getErrorMessage(err)}`);
+        console.error("Erro Callback:", err);
+        res.send(`Erro no Login: ${formatError(err)}`);
     }
 });
 
-// Busca Música
+// ROTA DE BUSCA DE MÚSICA
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
 
@@ -107,19 +106,20 @@ app.get('/current-track', async (req, res) => {
     // Renovação de Token
     if (Date.now() >= user.expiresAt - 60000) {
         try {
+            console.log(`[REFRESH] Tentando renovar para ${sl_uuid}...`);
             const data = await spotifyApi.refreshAccessToken();
             usersDB[sl_uuid].accessToken = data.body.access_token;
             const expiresIn = data.body.expires_in || 3600;
             usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
+            
             if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
             spotifyApi.setAccessToken(data.body.access_token);
+            console.log(`[REFRESH] Sucesso.`);
         } catch (err) {
-            // AQUI ESTAVA O PROBLEMA: Agora usamos String() para garantir texto
-            const msgErro = getErrorMessage(err);
-            console.log("Erro no Refresh:", msgErro);
-            
+            const msg = formatError(err);
+            console.log("Erro Refresh:", msg);
             return res.json({ 
-                track: `Erro: ${msgErro.substring(0, 50)}`, // Corta curto p/ caber
+                track: `Erro: ${msg.substring(0, 40)}`, 
                 artist: 'Relogue o HUD', 
                 error_code: "REFRESH_ERROR" 
             });
@@ -164,17 +164,18 @@ app.get('/current-track', async (req, res) => {
         });
 
     } catch (err) {
-        const msgErro = getErrorMessage(err);
-        console.log("Erro na API:", msgErro);
+        // AQUI ACONTECE A MÁGICA
+        const msg = formatError(err);
+        console.error("Erro API:", msg); // Aparece no Log do Render
         
         res.json({ 
-            track: `Erro: ${msgErro.substring(0, 50)}`, 
-            artist: `Tente Logar Novamente`,
+            track: `Erro: ${msg.substring(0, 50)}`, // Corta para caber no HUD
+            artist: `Verifique o Painel`,
             error_code: "API_FAIL"
         });
     }
 });
 
 app.listen(PORT, () => {
-    console.log(`Servidor V4 Blindado rodando na porta ${PORT}`);
+    console.log(`Servidor V5 (Debug) rodando na porta ${PORT}`);
 });

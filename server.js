@@ -37,7 +37,7 @@ function formatError(err) {
     }
 }
 
-// === HELPER FUNCTION: AUTHENTICATE AND REFRESH TOKEN ===
+// === HELPER FUNCTION: AUTHENTICATE AND REFRESH TOKEN (FOR ALL ROUTES) ===
 async function getAuthenticatedApi(sl_uuid) {
     if (!sl_uuid || !usersDB[sl_uuid]) return null;
 
@@ -65,7 +65,7 @@ async function getAuthenticatedApi(sl_uuid) {
     return spotifyApi;
 }
 
-// === ROUTE 1: LOGIN (NOW WITH CONTROL SCOPE) ===
+// === ROUTE 1: LOGIN (WITH CONTROL SCOPE) ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
@@ -74,7 +74,7 @@ app.get('/login', (req, res) => {
     }
     
     const spotifyApi = getSpotifyApi();
-    // Includes 'user-modify-playback-state' for Play/Pause/Next
+    // Scope includes 'user-modify-playback-state' for Play/Pause/Next
     const scopes = [
         'user-read-currently-playing', 
         'user-read-playback-state', 
@@ -106,7 +106,7 @@ app.get('/callback', async (req, res) => {
         
         console.log(`[LOGIN] Success for: ${sl_uuid}`);
         
-        // --- TRANSLATED SUCCESS SCREEN ---
+        // --- ENGLISH SUCCESS SCREEN (AWESOME!) ---
         res.send(`
             <body style="background:#191414; color:#FFFFFF; font-family:sans-serif; text-align:center; padding-top:100px;">
                 <h1 style="color:#1DB954; font-size:48px;">Awesome!</h1>
@@ -125,6 +125,7 @@ app.get('/current-track', async (req, res) => {
     const spotifyApi = await getAuthenticatedApi(sl_uuid);
 
     if (!spotifyApi) {
+        // --- ENGLISH RESPONSE ---
         return res.json({ track: 'Not Connected', artist: 'Tap to Log In', error_code: "NOT_LOGGED" });
     }
 
@@ -155,7 +156,7 @@ app.get('/current-track', async (req, res) => {
     }
 });
 
-// === NEW CONTROL ROUTES (BUTTONS) ===
+// === CONTROL ROUTES (PLAY/PAUSE/NEXT) ===
 
 app.post('/next', async (req, res) => {
     const sl_uuid = req.query.uuid;

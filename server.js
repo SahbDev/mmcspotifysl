@@ -9,7 +9,7 @@ const CLIENT_SECRET = process.env.SPOTIFY_CLIENT_SECRET || 'f1090563300d4a598dbb
 const REDIRECT_URI = process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.com/callback';
 
 // === BANCO DE DADOS NA MEMÓRIA ===
-// Guarda os tokens de cada avatar separadamente
+// Guarda os tokens de cada avatar separadamente pela chave UUID
 const usersDB = {}; 
 
 app.use(express.static('public'));
@@ -24,33 +24,23 @@ function getSpotifyApi() {
     });
 }
 
-// === FUNÇÃO AUXILIAR: TRADUTOR DE ERROS (FIM DO [object Object]) ===
+// === FUNÇÃO AUXILIAR: TRADUTOR DE ERROS ===
 function formatError(err) {
     try {
         if (!err) return "Erro Desconhecido";
-
-        // 1. Erros vindos do corpo da resposta do Spotify
         if (err.body) {
-            // Ex: User not registered in the Developer Dashboard
             if (err.body.error_description) return "Spotify: " + err.body.error_description;
-            // Ex: The access token expired
             if (err.body.error && err.body.error.message) return "Spotify: " + err.body.error.message;
-            // Ex: invalid_grant
             if (typeof err.body.error === 'string') return "Spotify: " + err.body.error;
         }
-
-        // 2. Erros de conexão ou javascript simples
         if (err.message) return err.message;
-
-        // 3. Última tentativa: força conversão para texto limpo
         return JSON.stringify(err).replace(/[{}"]/g, ' '); 
-
     } catch (e) {
         return "Erro Interno no Servidor";
     }
 }
 
-// === ROTA 1: LOGIN (LSL Manda o Usuário pra cá) ===
+// === ROTA 1: LOGIN ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
@@ -61,15 +51,14 @@ app.get('/login', (req, res) => {
     const spotifyApi = getSpotifyApi();
     const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position'];
     
-    // Passamos o UUID no 'state' para não perdê-lo durante o login
     const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid);
     res.redirect(authUrl);
 });
 
-// === ROTA 2: CALLBACK (Spotify devolve o Usuário pra cá) ===
+// === ROTA 2: CALLBACK ===
 app.get('/callback', async (req, res) => {
     const { code, state, error } = req.query;
-    const sl_uuid = state; // Recuperamos o UUID aqui
+    const sl_uuid = state; 
 
     if (error) return res.send(`Erro do Spotify: ${error}`);
     if (!code || !sl_uuid) return res.send(`Erro Crítico: Código ou UUID faltando.`);
@@ -78,7 +67,7 @@ app.get('/callback', async (req, res) => {
         const spotifyApi = getSpotifyApi();
         const data = await spotifyApi.authorizationCodeGrant(code);
 
-        // SALVA O USUÁRIO NO BANCO
+        // SALVA O USUÁRIO NO BANCO USANDO O UUID COMO CHAVE
         usersDB[sl_uuid] = {
             accessToken: data.body.access_token,
             refreshToken: data.body.refresh_token,
@@ -90,10 +79,7 @@ app.get('/callback', async (req, res) => {
         res.send(`
             <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
                 <h1 style="color:#1DB954; font-size:40px;">Conectado!</h1>
-                <p>Seu HUD no Second Life já pode tocar música.</p>
-                <div style="margin-top:20px; padding:10px; background:#282828; display:inline-block; border-radius:10px;">
-                    UUID: ${sl_uuid}
-                </div>
+                <p>O UUID <b>${sl_uuid}</b> está pronto para tocar.</p>
             </body>
         `);
     } catch (err) {
@@ -102,11 +88,11 @@ app.get('/callback', async (req, res) => {
     }
 });
 
-// === ROTA 3: BUSCAR MÚSICA (LSL Pede a música aqui) ===
+// === ROTA 3: BUSCAR MÚSICA ===
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
 
-    // 1. Verifica se o usuário existe no banco
+    // 1. Verifica se este UUID específico fez login
     if (!sl_uuid || !usersDB[sl_uuid]) {
         return res.json({ 
             track: 'Não conectado', 
@@ -115,15 +101,14 @@ app.get('/current-track', async (req, res) => {
         });
     }
 
-    let user = usersDB[sl_uuid];
+    let user = usersDB[sl_uuid]; // Pega a sessão DESTE usuário
     const spotifyApi = getSpotifyApi();
     spotifyApi.setAccessToken(user.accessToken);
     spotifyApi.setRefreshToken(user.refreshToken);
 
-    // 2. Verifica se precisa renovar o token (Refresh)
+    // 2. Renova token se necessário
     if (Date.now() >= user.expiresAt - 60000) {
         try {
-            console.log(`[REFRESH] Renovando token de ${sl_uuid}...`);
             const data = await spotifyApi.refreshAccessToken();
             usersDB[sl_uuid].accessToken = data.body.access_token;
             
@@ -133,8 +118,6 @@ app.get('/current-track', async (req, res) => {
             if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
             spotifyApi.setAccessToken(data.body.access_token);
         } catch (err) {
-            const msg = formatError(err);
-            console.log("Erro no Refresh:", msg);
             return res.json({ 
                 track: `Erro de Sessão`, 
                 artist: 'Relogue o HUD',
@@ -143,33 +126,20 @@ app.get('/current-track', async (req, res) => {
         }
     }
 
-    // 3. Busca a música no Spotify
+    // 3. Busca a música
     try {
         const playback = await spotifyApi.getMyCurrentPlaybackState();
 
-        // Tratamento: Nada tocando ou player fechado
         if (playback.statusCode === 204 || !playback.body || Object.keys(playback.body).length === 0) {
-            return res.json({
-                is_playing: false,
-                track: 'Nada tocando',
-                artist: '',
-                progress: 0, duration: 0
-            });
+            return res.json({ is_playing: false, track: 'Nada tocando', artist: '', progress: 0, duration: 0 });
         }
 
         const item = playback.body.item;
         
-        // Tratamento: Comercial ou Podcast desconhecido
         if (!item) {
-             return res.json({
-                is_playing: false,
-                track: 'Comercial / Outro',
-                artist: 'Spotify',
-                progress: 0, duration: 0
-            });
+             return res.json({ is_playing: false, track: 'Comercial / Outro', artist: 'Spotify', progress: 0, duration: 0 });
         }
 
-        // Formata Nomes dos Artistas
         let artistName = "Desconhecido";
         if (item.artists && item.artists.length > 0) {
             artistName = item.artists.map(a => a.name).join(', ');
@@ -177,7 +147,6 @@ app.get('/current-track', async (req, res) => {
             artistName = item.show.name + " (Podcast)";
         }
 
-        // SUCESSO: Retorna o JSON limpo
         res.json({
             is_playing: playback.body.is_playing,
             track: item.name,
@@ -188,9 +157,6 @@ app.get('/current-track', async (req, res) => {
 
     } catch (err) {
         const msg = formatError(err);
-        console.error("Erro API:", msg);
-        
-        // Envia o erro REAL para o HUD (Sem [object Object])
         res.json({ 
             track: `Erro: ${msg.substring(0, 40)}...`, 
             artist: `Verifique Instruções`,
@@ -199,7 +165,6 @@ app.get('/current-track', async (req, res) => {
     }
 });
 
-// Inicia o Servidor
 app.listen(PORT, () => {
     console.log(`Servidor V6 Universal rodando na porta ${PORT}`);
 });

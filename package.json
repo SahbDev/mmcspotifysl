@@ -1,26 +1,25 @@
 {
-  "name": "mmc-spotify-sl",
-  "version": "4.0.0",
-  "description": "Spotify Multi-Tenant Player for Second Life with Controls",
-  "main": "server.js",
-  "scripts": {
-    "start": "node server.js",
-    "test": "echo \"Test performed - server running\" && exit 0"
-  },
-  "keywords": [
-    "spotify",
-    "secondlife",
-    "music",
-    "player",
-    "hud"
-  ],
-  "author": "MMC Systems",
-  "license": "MIT",
-  "dependencies": {
-    "express": "^4.18.2",
-    "spotify-web-api-node": "^5.0.2"
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  }
+  "name": "mmc-spotify-sl",
+  "version": "4.0.0",
+  "description": "Spotify Multi-Tenant Player for Second Life with Controls",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "spotify",
+    "secondlife",
+    "music",
+    "player",
+    "hud"
+  ],
+  "author": "MMC Systems",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "spotify-web-api-node": "^5.0.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
 }

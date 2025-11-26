@@ -11,8 +11,8 @@ const REDIRECT_URI = process.env.REDIRECT_URI || 'https://mmcspotifysl.onrender.
 // === BANCO DE DADOS NA MEMÓRIA ===
 const usersDB = {}; 
 
+app.use(express.static('public'));
 app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
 
 function getSpotifyApi() {
     return new SpotifyWebApi({
@@ -37,18 +37,7 @@ function formatError(err) {
     }
 }
 
-// === ROTA 1: PÁGINA INICIAL ===
-app.get('/', (req, res) => {
-    res.send(`
-        <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
-            <h1 style="color:#1DB954;">🎵 MMC Spotify SL</h1>
-            <p>Servidor rodando corretamente!</p>
-            <p style="color:#ccc; font-size:12px;">Use o HUD no Second Life para conectar.</p>
-        </body>
-    `);
-});
-
-// === ROTA 2: LOGIN ===
+// === ROTA 1: LOGIN (AGORA COM TRAVA) ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
@@ -57,14 +46,16 @@ app.get('/login', (req, res) => {
     }
     
     const spotifyApi = getSpotifyApi();
-    const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position', 'user-modify-playback-state'];
+    const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position'];
     
+    // O 'true' no final FORÇA o Spotify a mostrar a tela de login/confirmação
+    // Isso evita que o Avatar B entre na conta do Avatar A por engano
     const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
     
     res.redirect(authUrl);
 });
 
-// === ROTA 3: CALLBACK ===
+// === ROTA 2: CALLBACK ===
 app.get('/callback', async (req, res) => {
     const { code, state, error } = req.query;
     const sl_uuid = state; 
@@ -86,11 +77,9 @@ app.get('/callback', async (req, res) => {
         
         res.send(`
             <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
-                <h1 style="color:#1DB954;">✅ Conectado!</h1>
-                <p>Conta do Spotify vinculada com sucesso!</p>
-                <p>UUID: <b>${sl_uuid}</b></p>
-                <p style="color:#1DB954;">Agora você pode usar os controles no Second Life!</p>
-                <p style="color:#ccc; font-size:12px;">Esta janela pode ser fechada.</p>
+                <h1 style="color:#1DB954;">Conectado!</h1>
+                <p>Conta vinculada ao UUID:<br><b>${sl_uuid}</b></p>
+                <p style="color:#ccc; font-size:12px;">Pode fechar esta janela.</p>
             </body>
         `);
     } catch (err) {
@@ -98,7 +87,7 @@ app.get('/callback', async (req, res) => {
     }
 });
 
-// === ROTA 4: BUSCAR MÚSICA ATUAL ===
+// === ROTA 3: BUSCAR MÚSICA ===
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
 
@@ -152,73 +141,4 @@ app.get('/current-track', async (req, res) => {
     }
 });
 
-// === ROTA 5: CONTROLES PLAYBACK ===
-app.post('/playback-control', async (req, res) => {
-    const { uuid, action } = req.body;
-
-    if (!uuid || !usersDB[uuid]) {
-        return res.json({ success: false, error: 'Usuário não logado' });
-    }
-
-    let user = usersDB[uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    try {
-        let result;
-        switch (action) {
-            case 'play':
-                result = await spotifyApi.play();
-                break;
-            case 'pause':
-                result = await spotifyApi.pause();
-                break;
-            case 'next':
-                result = await spotifyApi.skipToNext();
-                break;
-            case 'previous':
-                result = await spotifyApi.skipToPrevious();
-                break;
-            default:
-                return res.json({ success: false, error: 'Ação inválida' });
-        }
-
-        res.json({ success: true, message: `Ação ${action} executada` });
-    } catch (err) {
-        res.json({ success: false, error: formatError(err) });
-    }
-});
-
-// === ROTA 6: TOGGLE PLAY/PAUSE ===
-app.post('/play-pause', async (req, res) => {
-    const { uuid } = req.body;
-
-    if (!uuid || !usersDB[uuid]) {
-        return res.json({ success: false, error: 'Usuário não logado' });
-    }
-
-    let user = usersDB[uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    try {
-        const playback = await spotifyApi.getMyCurrentPlaybackState();
-        
-        if (playback.body && playback.body.is_playing) {
-            await spotifyApi.pause();
-            res.json({ success: true, action: 'paused', message: 'Música pausada' });
-        } else {
-            await spotifyApi.play();
-            res.json({ success: true, action: 'played', message: 'Música reproduzida' });
-        }
-    } catch (err) {
-        res.json({ success: false, error: formatError(err) });
-    }
-});
-
-app.listen(PORT, () => { 
-    console.log(`🎵 MMC Spotify SL Server rodando na porta ${PORT}`);
-    console.log(`✅ Pronto para receber conexões do Second Life!`);
-});
+app.listen(PORT, () => { console.log(`Servidor V7 Rodando na porta ${PORT}`); });

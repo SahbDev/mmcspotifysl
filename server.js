@@ -177,7 +177,6 @@ app.post('/control/:action', async (req, res) => {
                 spotifyResponse = await spotifyApi.skipToPrevious();
                 break;
             case 'pause':
-                // Verifica o estado atual para saber se deve pausar ou tocar
                 const playback = await spotifyApi.getMyCurrentPlaybackState();
                 if (playback.body && playback.body.is_playing) {
                     spotifyResponse = await spotifyApi.pause(); // Pausa
@@ -189,8 +188,7 @@ app.post('/control/:action', async (req, res) => {
                 return res.status(400).json({ error: 'Invalid control action.' });
         }
         
-        // CORREÇÃO CRÍTICA DE SINCRONIA:
-        // Após o comando, espera um momento e busca o novo estado de reprodução
+        // Espera e busca o novo estado de reprodução
         await new Promise(resolve => setTimeout(resolve, 500)); 
         
         const newPlayback = await spotifyApi.getMyCurrentPlaybackState();

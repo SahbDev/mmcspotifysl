@@ -37,7 +37,36 @@ function formatError(err) {
     }
 }
 
-// === ROTA 1: LOGIN (AGORA COM TRAVA) ===
+// === FUNÇÃO AUXILIAR: AUTENTICAR E ATUALIZAR TOKEN ===
+// Isso evita repetir código em todas as rotas (Play, Pause, Next, etc)
+async function getAuthenticatedApi(sl_uuid) {
+    if (!sl_uuid || !usersDB[sl_uuid]) return null;
+
+    let user = usersDB[sl_uuid];
+    const spotifyApi = getSpotifyApi();
+    spotifyApi.setAccessToken(user.accessToken);
+    spotifyApi.setRefreshToken(user.refreshToken);
+
+    // Verifica se precisa renovar o token (Refresh Token)
+    if (Date.now() >= user.expiresAt - 60000) {
+        try {
+            const data = await spotifyApi.refreshAccessToken();
+            usersDB[sl_uuid].accessToken = data.body.access_token;
+            const expiresIn = data.body.expires_in || 3600;
+            usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
+            
+            if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
+            spotifyApi.setAccessToken(data.body.access_token);
+            console.log(`[REFRESH] Token renovado para ${sl_uuid}`);
+        } catch (err) {
+            console.error(`[REFRESH ERROR] Falha ao renovar para ${sl_uuid}`);
+            return null;
+        }
+    }
+    return spotifyApi;
+}
+
+// === ROTA 1: LOGIN (AGORA COM PERMISSÃO DE CONTROLE) ===
 app.get('/login', (req, res) => {
     const sl_uuid = req.query.uuid;
     
@@ -46,12 +75,15 @@ app.get('/login', (req, res) => {
     }
     
     const spotifyApi = getSpotifyApi();
-    const scopes = ['user-read-currently-playing', 'user-read-playback-state', 'user-read-playback-position'];
+    // ADICIONADO 'user-modify-playback-state' PARA PERMITIR PLAY/PAUSE/NEXT
+    const scopes = [
+        'user-read-currently-playing', 
+        'user-read-playback-state', 
+        'user-read-playback-position',
+        'user-modify-playback-state' 
+    ];
     
-    // O 'true' no final FORÇA o Spotify a mostrar a tela de login/confirmação
-    // Isso evita que o Avatar B entre na conta do Avatar A por engano
     const authUrl = spotifyApi.createAuthorizeURL(scopes, sl_uuid, true);
-    
     res.redirect(authUrl);
 });
 
@@ -79,7 +111,7 @@ app.get('/callback', async (req, res) => {
             <body style="background:#121212; color:white; font-family:sans-serif; text-align:center; padding-top:50px;">
                 <h1 style="color:#1DB954;">Conectado!</h1>
                 <p>Conta vinculada ao UUID:<br><b>${sl_uuid}</b></p>
-                <p style="color:#ccc; font-size:12px;">Pode fechar esta janela.</p>
+                <p style="color:#ccc; font-size:12px;">Pode fechar esta janela e testar os botões.</p>
             </body>
         `);
     } catch (err) {
@@ -90,28 +122,10 @@ app.get('/callback', async (req, res) => {
 // === ROTA 3: BUSCAR MÚSICA ===
 app.get('/current-track', async (req, res) => {
     const sl_uuid = req.query.uuid;
+    const spotifyApi = await getAuthenticatedApi(sl_uuid);
 
-    if (!sl_uuid || !usersDB[sl_uuid]) {
+    if (!spotifyApi) {
         return res.json({ track: 'Não conectado', artist: 'Toque para Logar', error_code: "NOT_LOGGED" });
-    }
-
-    let user = usersDB[sl_uuid];
-    const spotifyApi = getSpotifyApi();
-    spotifyApi.setAccessToken(user.accessToken);
-    spotifyApi.setRefreshToken(user.refreshToken);
-
-    // Refresh Token
-    if (Date.now() >= user.expiresAt - 60000) {
-        try {
-            const data = await spotifyApi.refreshAccessToken();
-            usersDB[sl_uuid].accessToken = data.body.access_token;
-            const expiresIn = data.body.expires_in || 3600;
-            usersDB[sl_uuid].expiresAt = Date.now() + (expiresIn * 1000);
-            if (data.body.refresh_token) usersDB[sl_uuid].refreshToken = data.body.refresh_token;
-            spotifyApi.setAccessToken(data.body.access_token);
-        } catch (err) {
-            return res.json({ track: `Erro Sessão`, artist: 'Relogue o HUD', error_code: "REFRESH_ERROR" });
-        }
     }
 
     try {
@@ -141,4 +155,66 @@ app.get('/current-track', async (req, res) => {
     }
 });
 
-app.listen(PORT, () => { console.log(`Servidor V7 Rodando na porta ${PORT}`); });
+// === NOVAS ROTAS DE CONTROLE (BOTÕES) ===
+
+// Rota: Próxima Música
+app.post('/next', async (req, res) => {
+    const sl_uuid = req.query.uuid;
+    const spotifyApi = await getAuthenticatedApi(sl_uuid);
+    if (!spotifyApi) return res.status(401).send("Não logado");
+
+    try {
+        await spotifyApi.skipToNext();
+        res.send("OK");
+    } catch (err) {
+        console.error(err);
+        res.status(500).send(formatError(err));
+    }
+});
+
+// Rota: Música Anterior
+app.post('/previous', async (req, res) => {
+    const sl_uuid = req.query.uuid;
+    const spotifyApi = await getAuthenticatedApi(sl_uuid);
+    if (!spotifyApi) return res.status(401).send("Não logado");
+
+    try {
+        await spotifyApi.skipToPrevious();
+        res.send("OK");
+    } catch (err) {
+        console.error(err);
+        res.status(500).send(formatError(err));
+    }
+});
+
+// Rota: Pausar
+app.post('/pause', async (req, res) => {
+    const sl_uuid = req.query.uuid;
+    const spotifyApi = await getAuthenticatedApi(sl_uuid);
+    if (!spotifyApi) return res.status(401).send("Não logado");
+
+    try {
+        await spotifyApi.pause();
+        res.send("OK");
+    } catch (err) {
+        console.error(err); // Se já estiver pausado, o Spotify pode dar erro, mas ignoramos
+        res.status(500).send(formatError(err));
+    }
+});
+
+// Rota: Dar Play
+app.post('/play', async (req, res) => {
+    const sl_uuid = req.query.uuid;
+    const spotifyApi = await getAuthenticatedApi(sl_uuid);
+    if (!spotifyApi) return res.status(401).send("Não logado");
+
+    try {
+        await spotifyApi.play();
+        res.send("OK");
+    } catch (err) {
+        console.error(err);
+        res.status(500).send(formatError(err));
+    }
+});
+
+app.listen(PORT, () => { console.log(`Servidor V8 Rodando na porta ${PORT}`); });

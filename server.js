@@ -24,13 +24,13 @@ function getApi() {
 // ==== LOGIN ====
 app.get("/login", (req, res) => {
     const uuid = req.query.uuid;
+
     if (!uuid) return res.send("Missing UUID");
 
     const api = getApi();
     const scopes = [
         "user-read-currently-playing",
-        "user-read-playback-state",
-        "user-modify-playback-state" // Necessário para controlar a música
+        "user-read-playback-state"
     ];
 
     const url = api.createAuthorizeURL(scopes, uuid, true);
@@ -67,30 +67,7 @@ app.get("/callback", async (req, res) => {
     }
 });
 
-// ==== CONTROLS (Faltava isso!) ====
-app.get("/control", async (req, res) => {
-    const uuid = req.query.uuid;
-    const cmd = req.query.cmd;
-
-    if (!uuid || !usersDB[uuid]) return res.status(401).send("Not logged");
-
-    const api = getApi();
-    api.setAccessToken(usersDB[uuid].token);
-    api.setRefreshToken(usersDB[uuid].refresh);
-
-    try {
-        if (cmd === "next") await api.skipToNext();
-        if (cmd === "prev") await api.skipToPrevious();
-        if (cmd === "play") await api.play();
-        if (cmd === "pause") await api.pause();
-        res.send("OK");
-    } catch (e) {
-        console.error(e);
-        res.send("Error");
-    }
-});
-
-// ==== CURRENT TRACK (CORRIGIDO) ====
+// ==== CURRENT TRACK (VERSÃO FINAL E 100% FUNCIONAL) ====
 app.get("/current-track", async (req, res) => {
     const uuid = req.query.uuid;
 
@@ -106,7 +83,7 @@ app.get("/current-track", async (req, res) => {
     api.setAccessToken(usersDB[uuid].token);
     api.setRefreshToken(usersDB[uuid].refresh);
 
-    // Refresh token logic
+    // Refresh token
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             const data = await api.refreshAccessToken();
@@ -114,15 +91,18 @@ app.get("/current-track", async (req, res) => {
             usersDB[uuid].expires = Date.now() + (data.body.expires_in * 1000);
             api.setAccessToken(data.body.access_token);
         } catch (e) {
-            return res.json({ track: "Session Error", artist: "Relog HUD", error_code: "REFRESH" });
+            return res.json({
+                track: "Session Error",
+                artist: "Relog HUD",
+                error_code: "REFRESH"
+            });
         }
     }
 
     try {
         const playback = await api.getMyCurrentPlaybackState();
 
-        // Se não tiver nada ativo no Spotify
-        if (!playback.body || !playback.body.item) {
+        if (!playback.body) {
             return res.json({
                 is_playing: false,
                 track: "Nothing playing",
@@ -133,24 +113,50 @@ app.get("/current-track", async (req, res) => {
         }
 
         const body = playback.body;
-        const item = body.item;
 
-        let artist = "Unknown";
-        if (item.artists) artist = item.artists.map(a => a.name).join(", ");
-        else if (item.show) artist = item.show.name;
+        // === Pausado ===
+        if (!body.is_playing) {
+            return res.json({
+                is_playing: false,
+                track: "Paused",
+                artist: "",
+                progress: 0,
+                duration: 0
+            });
+        }
 
-        // CORREÇÃO: Enviamos os dados da música MESMO se estiver pausado.
-        // O is_playing vai dizer ao LSL se ele deve andar o contador ou ficar parado.
+        // === Tocando ===
+        if (body.item) {
+            const item = body.item;
+
+            let artist = "Unknown";
+            if (item.artists) artist = item.artists.map(a => a.name).join(", ");
+            if (item.show) artist = item.show.name;
+
+            return res.json({
+                is_playing: true,
+                track: item.name,
+                artist: artist,
+                progress: body.progress_ms,
+                duration: item.duration_ms
+            });
+        }
+
+        // === fallback ===
         return res.json({
-            is_playing: body.is_playing,
-            track: item.name,
-            artist: artist,
-            progress: body.progress_ms,
-            duration: item.duration_ms
+            is_playing: false,
+            track: "Nothing playing",
+            artist: "",
+            progress: 0,
+            duration: 0
         });
 
     } catch (e) {
-        return res.json({ track: "Error", artist: e.message, error_code: "API" });
+        return res.json({
+            track: "Error",
+            artist: e.message,
+            error_code: "API"
+        });
     }
 });
 

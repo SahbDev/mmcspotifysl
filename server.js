@@ -59,6 +59,7 @@ app.get("/control", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
     
+    // Auto-Refresh rápido
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -86,6 +87,7 @@ app.get("/current-track", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
 
+    // Auto-Refresh
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -105,6 +107,8 @@ app.get("/current-track", async (req, res) => {
 
         const item = playback.body.item;
         const artist = item.artists ? item.artists.map(a => a.name).join(", ") : "Unknown";
+        
+        // Conversão para Texto (Blindagem contra bug do SL)
         const playingStatus = playback.body.is_playing ? "true" : "false";
 
         return res.json({
@@ -117,7 +121,7 @@ app.get("/current-track", async (req, res) => {
     } catch (e) { return res.json({ track: "API Error", error_code: "API" }); }
 });
 
-// ==== ROTA 5: LOGOUT (NOVO!) ====
+// ==== ROTA 5: LOGOUT (ESSENCIAL PARA O BOTÃO RESET) ====
 app.get("/logout", (req, res) => {
     const { uuid } = req.query;
     if (usersDB[uuid]) {

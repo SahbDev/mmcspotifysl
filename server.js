@@ -59,7 +59,6 @@ app.get("/control", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
     
-    // Auto-Refresh rápido para o controle
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -79,7 +78,7 @@ app.get("/control", async (req, res) => {
     } catch (e) { res.send("Error"); }
 });
 
-// ==== ROTA 4: TRACK INFO (A CORREÇÃO ESTÁ AQUI) ====
+// ==== ROTA 4: TRACK INFO ====
 app.get("/current-track", async (req, res) => {
     const { uuid } = req.query;
     if (!usersDB[uuid]) return res.json({ track: "Not connected", error_code: "NOT_LOGGED" });
@@ -87,7 +86,6 @@ app.get("/current-track", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
 
-    // Auto-Refresh
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -102,15 +100,11 @@ app.get("/current-track", async (req, res) => {
         const playback = await api.getMyCurrentPlaybackState();
         
         if (!playback.body || !playback.body.item) {
-            // Garante envio como STRING para evitar erros no LSL
             return res.json({ is_playing: "false", track: "Nothing Playing", duration: 0, progress: 0 });
         }
 
         const item = playback.body.item;
         const artist = item.artists ? item.artists.map(a => a.name).join(", ") : "Unknown";
-        
-        // CORREÇÃO: Converte o status (true/false) para TEXTO ("true"/"false")
-        // Isso resolve o bug do Second Life ler errado
         const playingStatus = playback.body.is_playing ? "true" : "false";
 
         return res.json({
@@ -121,6 +115,15 @@ app.get("/current-track", async (req, res) => {
             duration: item.duration_ms
         });
     } catch (e) { return res.json({ track: "API Error", error_code: "API" }); }
+});
+
+// ==== ROTA 5: LOGOUT (NOVO!) ====
+app.get("/logout", (req, res) => {
+    const { uuid } = req.query;
+    if (usersDB[uuid]) {
+        delete usersDB[uuid]; // Apaga o usuário da memória
+    }
+    res.send("Logged out");
 });
 
 app.listen(PORT, () => console.log("Server Running"));

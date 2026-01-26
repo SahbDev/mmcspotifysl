@@ -1,54 +1,114 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
-    <title>Spotify para Second Life</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MMC Spotify | Private Setup</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            max-width: 600px;
-            margin: 50px auto;
-            padding: 20px;
-            text-align: center;
-            background: linear-gradient(135deg, #1DB954, #191414);
-            color: white;
+            background-color: #000000;
+            color: #ffffff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            margin: 0;
         }
         .container {
-            background: rgba(255,255,255,0.1);
-            padding: 30px;
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
+            background: #121212;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 255, 0, 0.1);
+            width: 100%;
+            max-width: 400px;
+            text-align: center;
+            border: 1px solid #333;
         }
-        .button {
-            background-color: #1DB954;
+        h1 { color: #1DB954; margin-bottom: 10px; font-size: 24px; }
+        p { color: #aaa; font-size: 14px; margin-bottom: 30px; line-height: 1.5; }
+        
+        label { display: block; text-align: left; margin-bottom: 5px; font-size: 12px; color: #888; letter-spacing: 1px; text-transform: uppercase; }
+        input[type="text"] {
+            width: 100%;
+            padding: 12px;
+            margin-bottom: 20px;
+            background: #222;
+            border: 1px solid #333;
             color: white;
-            padding: 15px 30px;
-            border: none;
-            border-radius: 25px;
-            font-size: 16px;
-            cursor: pointer;
-            text-decoration: none;
-            display: inline-block;
-            margin: 10px;
+            border-radius: 6px;
+            box-sizing: border-box;
+            outline: none;
+            transition: border-color 0.3s;
         }
+        input[type="text"]:focus { border-color: #1DB954; }
+        
+        button {
+            background-color: #1DB954;
+            color: black;
+            font-weight: bold;
+            border: none;
+            padding: 15px;
+            width: 100%;
+            border-radius: 30px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: transform 0.2s;
+        }
+        button:hover { transform: scale(1.02); background-color: #1ed760; }
+        
+        .steps { text-align: left; margin-top: 30px; border-top: 1px solid #333; padding-top: 20px; }
+        .steps h3 { font-size: 14px; color: white; margin-bottom: 10px; }
+        .steps ol { padding-left: 20px; margin: 0; }
+        .steps li { font-size: 12px; color: #888; margin-bottom: 8px; }
+        a { color: #1DB954; text-decoration: none; }
+        a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
+
     <div class="container">
-        <h1>🎵 Spotify para Second Life</h1>
-        <p>Conecte sua conta do Spotify para mostrar a música atual no Second Life</p>
-        
-        <a href="/login" class="button">🔗 Conectar com Spotify</a>
-        
-        <div style="margin-top: 30px;">
-            <p><strong>URL para o Second Life:</strong></p>
-            <code id="sl-url">carregando...</code>
+        <h1>MMC Spotify</h1>
+        <p>Private Tunnel Setup<br>Establish a direct, lag-free connection.</p>
+
+        <form action="/connect" method="POST">
+            <input type="hidden" name="uuid" id="uuidField">
+
+            <label>Spotify Client ID</label>
+            <input type="text" name="clientId" placeholder="Paste Client ID here" required>
+
+            <label>Spotify Client Secret</label>
+            <input type="text" name="clientSecret" placeholder="Paste Client Secret here" required>
+
+            <button type="submit">CONNECT NOW</button>
+        </form>
+
+        <div class="steps">
+            <h3>How to get keys (1 min):</h3>
+            <ol>
+                <li>Go to <a href="https://developer.spotify.com/dashboard" target="_blank">Spotify Developer Dashboard</a>.</li>
+                <li>Click <b>"Create App"</b> (Name it anything).</li>
+                <li>In <b>Redirect URI</b>, paste exactly:<br>
+                    <code style="color:#fff; background:#222; padding:2px;">https://mmcspotifysl.onrender.com/callback</code>
+                </li>
+                <li>Click Save, then <b>Settings</b> to copy keys.</li>
+            </ol>
         </div>
     </div>
 
     <script>
-        // Mostrar URL atual para usar no SL
-        document.getElementById('sl-url').textContent = 
-            window.location.origin + '/current-track';
+        // Pega o UUID da URL (?uuid=...) e coloca no campo escondido
+        const params = new URLSearchParams(window.location.search);
+        const uuid = params.get("uuid");
+        if(uuid) {
+            document.getElementById("uuidField").value = uuid;
+        } else {
+            document.querySelector("p").innerHTML = "<span style='color:red'>Error: No UUID found. Please open this page via the HUD in Second Life.</span>";
+            document.querySelector("button").disabled = true;
+            document.querySelector("button").style.backgroundColor = "#555";
+        }
     </script>
+
 </body>
 </html>

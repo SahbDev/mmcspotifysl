@@ -29,7 +29,9 @@ app.get("/login", (req, res) => {
 
     const api = getApi();
     const scopes = ["user-read-currently-playing", "user-read-playback-state", "user-modify-playback-state"];
-    res.redirect(api.createAuthorizeURL(scopes, uuid, true));
+    
+    // CORREÇÃO AQUI: 'false' impede que a tela de "Concordar" apareça se já tiver autorizado antes
+    res.redirect(api.createAuthorizeURL(scopes, uuid, false));
 });
 
 // ==== ROTA 2: CALLBACK ====
@@ -59,7 +61,6 @@ app.get("/control", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
     
-    // Auto-Refresh rápido
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -87,7 +88,6 @@ app.get("/current-track", async (req, res) => {
     const api = getApi();
     api.setAccessToken(usersDB[uuid].token);
 
-    // Auto-Refresh
     if (Date.now() >= usersDB[uuid].expires - 60000) {
         try {
             api.setRefreshToken(usersDB[uuid].refresh);
@@ -107,25 +107,29 @@ app.get("/current-track", async (req, res) => {
 
         const item = playback.body.item;
         const artist = item.artists ? item.artists.map(a => a.name).join(", ") : "Unknown";
-        
-        // Conversão para Texto (Blindagem contra bug do SL)
         const playingStatus = playback.body.is_playing ? "true" : "false";
+
+        // EXTRAS: Pegando o Volume e Nome do Device
+        const deviceName = playback.body.device ? playback.body.device.name : "";
+        const volume = playback.body.device ? playback.body.device.volume_percent : 100;
 
         return res.json({
             is_playing: playingStatus, 
             track: item.name,
             artist: artist,
             progress: playback.body.progress_ms,
-            duration: item.duration_ms
+            duration: item.duration_ms,
+            device: deviceName, // Extra
+            volume: volume      // Extra
         });
     } catch (e) { return res.json({ track: "API Error", error_code: "API" }); }
 });
 
-// ==== ROTA 5: LOGOUT (ESSENCIAL PARA O BOTÃO RESET) ====
+// ==== ROTA 5: LOGOUT ====
 app.get("/logout", (req, res) => {
     const { uuid } = req.query;
     if (usersDB[uuid]) {
-        delete usersDB[uuid]; // Apaga o usuário da memória
+        delete usersDB[uuid]; 
     }
     res.send("Logged out");
 });
